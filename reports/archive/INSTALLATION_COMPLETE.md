@@ -29,7 +29,7 @@
 在这个目录运行 Claude Code：
 
 ```bash
-cd /Users/elise123/Tools/Claude/computer-use-mcp-server
+cd ~/Tools/Claude/computer-use-mcp-server
 claude
 ```
 
@@ -61,7 +61,7 @@ claude
     "computer-use": {
       "command": "node",
       "args": [
-        "/Users/elise123/Tools/Claude/computer-use-mcp-server/dist/index.js"
+        "$HOME/Tools/Claude/computer-use-mcp-server/dist/index.js"
       ]
     }
   }
@@ -82,7 +82,7 @@ claude
 ```bash
 claude mcp add computer-use \
   --command node \
-  --args "/Users/elise123/Tools/Claude/computer-use-mcp-server/dist/index.js"
+  --args "$HOME/Tools/Claude/computer-use-mcp-server/dist/index.js"
 ```
 
 **作用范围：** 所有 Claude Code 会话
@@ -148,7 +148,7 @@ Computer Use MCP Server 已经完全配置好，可以开始使用了！
 
 **项目位置：**
 ```
-/Users/elise123/Tools/Claude/computer-use-mcp-server/
+~/Tools/Claude/computer-use-mcp-server/
 ```
 
 **配置文件：**

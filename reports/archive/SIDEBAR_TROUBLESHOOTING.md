@@ -29,7 +29,7 @@ Desktop Extension 的 UI 面板可能需要应用完全重启才能加载。我�
 **B. Extension 注册问题**
 Extension 位于：
 ```
-/Users/elise123/.claude-projects-3p/Claude Extensions/local.mcpb.ios-simulator-panel-contributors.ios-simulator-panel/
+~/.claude-projects-3p/Claude Extensions/local.mcpb.ios-simulator-panel-contributors.ios-simulator-panel/
 ```
 
 这个路径是 Claude Desktop 扫描 extensions 的标准位置。
@@ -92,7 +92,7 @@ tail -f ~/Library/Logs/Claude/main.log
 
 在浏览器中测试 UI：
 ```bash
-cd "/Users/elise123/.claude-projects-3p/Claude Extensions/local.mcpb.ios-simulator-panel-contributors.ios-simulator-panel/dist/ui"
+cd "$HOME/.claude-projects-3p/Claude Extensions/local.mcpb.ios-simulator-panel-contributors.ios-simulator-panel/dist/ui"
 python3 -m http.server 8000
 # 打开 http://localhost:8000
 ```
@@ -103,7 +103,7 @@ python3 -m http.server 8000
 
 确保 Claude Desktop 可以读取 extension 目录：
 ```bash
-ls -la "/Users/elise123/.claude-projects-3p/Claude Extensions/local.mcpb.ios-simulator-panel-contributors.ios-simulator-panel/"
+ls -la "$HOME/.claude-projects-3p/Claude Extensions/local.mcpb.ios-simulator-panel-contributors.ios-simulator-panel/"
 ```
 
 ## 与 Claude Code Browser 面板的对比

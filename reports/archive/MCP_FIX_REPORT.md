@@ -19,7 +19,7 @@
 - `simulator_rotate`: 使用 AppleScript 发送 Cmd+Left/Right 键盘快捷键
 
 **修改文件：**
-- `/Users/elise123/.claude-projects-3p/Claude Extensions/local.mcpb.ios-simulator-panel-contributors.ios-simulator-panel/src/index.ts`
+- `~/.claude-projects-3p/Claude Extensions/local.mcpb.ios-simulator-panel-contributors.ios-simulator-panel/src/index.ts`
 - 创建了 `tsconfig.json` 以支持编译
 
 **修改代码：**
@@ -76,8 +76,8 @@ case "simulator_rotate": {
    - 自动将常见键名转换为 cliclick 格式
 
 **修改文件：**
-- `/Users/elise123/Tools/Claude/computer-use-mcp-server/src/utils.ts`
-- `/Users/elise123/Tools/Claude/computer-use-mcp-server/src/index.ts`
+- `~/Tools/Claude/computer-use-mcp-server/src/utils.ts`
+- `~/Tools/Claude/computer-use-mcp-server/src/index.ts`
 
 **修改代码：**
 
@@ -188,7 +188,7 @@ cd ~/Tools/Claude/computer-use-mcp-server
 node test-tools.mjs
 
 # 重新编译 iOS Simulator Panel（如果需要）
-cd "/Users/elise123/.claude-projects-3p/Claude Extensions/local.mcpb.ios-simulator-panel-contributors.ios-simulator-panel"
+cd "$HOME/.claude-projects-3p/Claude Extensions/local.mcpb.ios-simulator-panel-contributors.ios-simulator-panel"
 npm run build
 ```
 

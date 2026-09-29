@@ -230,7 +230,7 @@ for (const key of keys) {
 如果升级后遇到问题，可以快速回退：
 
 ```bash
-cd /Users/elise123/Tools/Claude/computer-use-mcp-server
+cd ~/Tools/Claude/computer-use-mcp-server
 
 # 恢复旧版本
 mv src/index.ts.backup src/index.ts

@@ -264,7 +264,7 @@ http://localhost:3456/browser.html
 ---
 
 **项目位置：**
-- `/Users/elise123/Tools/Claude/ios-simulator-panel/`
+- `~/Tools/Claude/ios-simulator-panel/`
 
 **访问地址：**
 - `http://localhost:3456/browser.html`

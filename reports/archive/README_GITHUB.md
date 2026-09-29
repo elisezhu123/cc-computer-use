@@ -43,7 +43,7 @@ Add to `~/.claude/settings.json`:
     "computer-use": {
       "command": "node",
       "args": [
-        "/Users/elise123/Tools/Claude/computer-use-mcp-server/dist/index.js"
+        "$HOME/Tools/Claude/computer-use-mcp-server/dist/index.js"
       ]
     }
   }

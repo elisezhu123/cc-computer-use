@@ -50,7 +50,7 @@ Add to `~/.claude/settings.json`:
     "computer-use-enhanced": {
       "command": "node",
       "args": [
-        "/Users/elise123/Tools/Claude/computer-use-mcp-server/dist/index-enhanced.js"
+        "$HOME/Tools/Claude/computer-use-mcp-server/dist/index-enhanced.js"
       ]
     }
   }

@@ -61,7 +61,7 @@ PROJECT-SUMMARY.md             项目总结和架构
     "computer-use-enhanced": {
       "command": "node",
       "args": [
-        "/Users/elise123/Tools/Claude/computer-use-mcp-server/dist/index-enhanced.js"
+        "$HOME/Tools/Claude/computer-use-mcp-server/dist/index-enhanced.js"
       ]
     }
   }
@@ -189,7 +189,7 @@ await click();
 
 ### 修改源代码后重新编译
 ```bash
-cd /Users/elise123/Tools/Claude/computer-use-mcp-server
+cd ~/Tools/Claude/computer-use-mcp-server
 npm run build
 # 重启 Claude Desktop
 ```

@@ -160,8 +160,8 @@ Claude: [调用 simulator_rotate with direction="left"]
 ---
 
 **修复文件位置：**
-- `/Users/elise123/Tools/Claude/ios-simulator-panel/` - Desktop Extension（已修复）
-- `/Users/elise123/Tools/Claude/computer-use-mcp-server/` - Computer Use MCP（已修复）
+- `~/Tools/Claude/ios-simulator-panel/` - Desktop Extension（已修复）
+- `~/Tools/Claude/computer-use-mcp-server/` - Computer Use MCP（已修复）
 
 **文档位置：**
 - `MCP_FIX_REPORT.md` - 详细修复文档
