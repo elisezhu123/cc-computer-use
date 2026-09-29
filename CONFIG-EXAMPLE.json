@@ -1,14 +1,8 @@
 {
   "mcpServers": {
-    "computer-use-enhanced": {
-      "comment": "Enhanced Computer Use MCP Server - 基于 CC-Source 最佳实践",
+    "computer-use": {
       "command": "node",
-      "args": [
-        "/Users/elise123/Tools/Claude/computer-use-mcp-server/dist/index-enhanced.js"
-      ],
-      "env": {
-        "NODE_ENV": "production"
-      }
+      "args": ["/path/to/cc-computer-use/dist/index.js"]
     }
   }
 }

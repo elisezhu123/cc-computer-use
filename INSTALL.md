@@ -1,433 +1,185 @@
-# 安装指南 (Installation Guide)
+# 安装与配置
 
-## 前置要求 (Prerequisites)
+## 1. 前置依赖
 
-### 1. 系统要求
-- macOS (已测试)
-- Node.js >= 18
-- Claude Desktop App
+| 依赖 | 安装 | 验证 |
+|------|------|------|
+| macOS | — | — |
+| Node.js ≥ 18 | `brew install node` 或 nvm | `node -v` |
+| cliclick | `brew install cliclick` | `cliclick -V` |
+| Xcode Command Line Tools | `xcode-select --install` | `swiftc --version` |
 
-### 2. 安装 cliclick
+Xcode Command Line Tools 只在第一次使用 `scroll` 或 `middle_click` 时用到，
+届时会把 `src/native/scroll.swift` 编译到 `~/.cache/computer-use-mcp/cuscroll`。
+
+## 2. 构建
+
 ```bash
-brew install cliclick
-```
-
-验证安装：
-```bash
-cliclick -V
-# 应该输出版本号，例如：cliclick 5.0
-```
-
-### 3. 系统权限设置
-
-**系统设置 → 隐私与安全性 → 辅助功能**
-
-添加以下应用：
-- ✅ Claude.app
-- ✅ Terminal.app (如果从终端测试)
-
----
-
-## 快速安装 (Quick Install)
-
-### 步骤1: 克隆/下载项目
-
-如果你已有项目文件：
-```bash
-cd /Users/elise123/Tools/Claude/computer-use-mcp-server
-```
-
-或者创建新项目：
-```bash
-mkdir -p ~/computer-use-mcp-server
-cd ~/computer-use-mcp-server
-# 复制所有 src/ 文件到这里
-```
-
-### 步骤2: 安装依赖
-```bash
+git clone https://github.com/elisezhu123/cc-computer-use.git
+cd cc-computer-use
 npm install
-```
-
-### 步骤3: 编译
-```bash
 npm run build
 ```
 
-你应该看到 `dist/` 目录被创建，包含：
-- index.js
-- index-enhanced.js ⭐
-- utils.js
-- utils-enhanced.js ⭐
-- types.js
+或者一步完成：`./setup.sh`（检查并安装 cliclick，然后安装依赖并构建）。
 
-### 步骤4: 配置 Claude Desktop
+构建产物在 `dist/`，入口是 `dist/index.js`（stdio）和 `dist/http-server.js`（HTTP）。
 
-编辑配置文件：
+## 3. 配置 MCP 客户端
+
+以下示例中的 `/path/to/cc-computer-use` 需要替换为实际路径。
+
+### Claude Code CLI
+
 ```bash
-code ~/.claude/settings.json
-# 或
-nano ~/.claude/settings.json
+# 仅当前项目可用（默认）
+claude mcp add computer-use -- node /path/to/cc-computer-use/dist/index.js
+
+# 所有项目都可用
+claude mcp add --scope user computer-use -- node /path/to/cc-computer-use/dist/index.js
+
+# 查看 / 删除
+claude mcp list
+claude mcp remove computer-use
 ```
 
-添加 MCP 服务器配置：
-```json
-{
-  "mcpServers": {
-    "computer-use-enhanced": {
-      "command": "node",
-      "args": [
-        "/Users/elise123/Tools/Claude/computer-use-mcp-server/dist/index-enhanced.js"
-      ]
-    }
-  }
-}
-```
+也可以运行 `./configure.sh`，它会用当前克隆路径执行上面的 `claude mcp add`。
 
-**⚠️ 注意：** 替换路径为你的实际安装路径！
+### Claude Code 项目配置文件
 
-### 步骤5: 重启 Claude Desktop
-
-完全退出并重新打开 Claude Desktop App。
-
-### 步骤6: 验证安装
-
-在 Claude Desktop 中询问：
-```
-请列出所有 computer_ 开头的工具
-```
-
-你应该看到10个工具：
-1. computer_screenshot
-2. computer_get_screen_info
-3. computer_mouse_move
-4. computer_mouse_click
-5. computer_type_text
-6. computer_press_key
-7. computer_get_mouse_position
-8. computer_run_applescript
-9. computer_drag ⭐
-10. computer_scroll ⭐
-
----
-
-## 测试安装 (Test Installation)
-
-### 测试1: 截图
-```
-请截图保存到 /tmp/test.png
-```
-
-### 测试2: 获取屏幕信息
-```
-请获取屏幕分辨率
-```
-
-### 测试3: 移动鼠标
-```
-请把鼠标移动到屏幕中央（使用动画）
-```
-
-### 测试4: 输入文本
-```
-请在当前位置输入"Hello World"（使用剪贴板）
-```
-
-### 测试5: 按键
-```
-请按下 Command+C 组合键
-```
-
----
-
-## 故障排查 (Troubleshooting)
-
-### 问题1: 工具未显示
-
-**症状：** Claude 说"没有 computer_xxx 工具"
-
-**解决方案：**
-1. 检查配置文件路径是否正确
-   ```bash
-   cat ~/.claude/settings.json
-   ```
-
-2. 检查编译输出是否存在
-   ```bash
-   ls -la ~/computer-use-mcp-server/dist/index-enhanced.js
-   ```
-
-3. 完全退出 Claude Desktop（右键 Dock 图标 → 退出）
-
-4. 重新打开 Claude Desktop
-
-### 问题2: cliclick 命令未找到
-
-**症状：** 错误信息包含 "cliclick: command not found"
-
-**解决方案：**
-```bash
-# 安装 cliclick
-brew install cliclick
-
-# 验证安装
-which cliclick
-# 应输出：/opt/homebrew/bin/cliclick 或类似路径
-```
-
-### 问题3: 权限被拒绝
-
-**症状：** 错误信息包含 "accessibility permission"
-
-**解决方案：**
-1. 打开 **系统设置**
-2. 进入 **隐私与安全性**
-3. 点击 **辅助功能**
-4. 点击左下角 🔒 解锁
-5. 点击 ➕ 添加 Claude.app
-6. 重启 Claude Desktop
-
-### 问题4: 点击不准确
-
-**症状：** 鼠标点击的位置不对
-
-**可能原因：**
-1. 多显示器设置
-2. 分辨率不匹配
-3. 缩放设置
-
-**解决方案：**
-```
-请先获取屏幕信息，然后使用 animated: true 选项移动鼠标
-```
-
-### 问题5: 输入中文乱码
-
-**症状：** 输入中文时出现乱码
-
-**解决方案：**
-```
-请使用 via_clipboard: true 选项输入文本
-```
-
-这样会通过剪贴板输入，支持所有 Unicode 字符。
-
-### 问题6: Node 版本过低
-
-**症状：** 错误信息 "Unsupported Node.js version"
-
-**解决方案：**
-```bash
-# 检查 Node 版本
-node -v
-# 需要 >= 18
-
-# 使用 nvm 升级
-nvm install 18
-nvm use 18
-
-# 或使用 brew
-brew upgrade node
-```
-
----
-
-## 高级配置 (Advanced Configuration)
-
-### 同时使用原版和增强版
+在项目根目录的 `.mcp.json` 中添加（可参考仓库里的 [`CONFIG-EXAMPLE.json`](CONFIG-EXAMPLE.json)）：
 
 ```json
 {
   "mcpServers": {
     "computer-use": {
       "command": "node",
-      "args": [
-        "/path/to/computer-use-mcp-server/dist/index.js"
-      ]
-    },
-    "computer-use-enhanced": {
-      "command": "node",
-      "args": [
-        "/path/to/computer-use-mcp-server/dist/index-enhanced.js"
-      ]
+      "args": ["/path/to/cc-computer-use/dist/index.js"]
     }
   }
 }
 ```
 
-### 启用调试日志
+### Claude Desktop
 
-修改 `src/index-enhanced.ts`：
-```typescript
-// 在文件顶部添加
-const DEBUG = true;
+编辑 `~/Library/Application Support/Claude/claude_desktop_config.json`，内容同上，然后完全退出并重新打开 Claude Desktop。
 
-// 在需要的地方添加
-if (DEBUG) console.error('[computer-use]', 'Debug info...');
-```
+### 只支持 HTTP 的客户端
 
-重新编译：
-```bash
-npm run build
-```
+参见 [GATEWAY.md](computer-use-mcp-server/GATEWAY.md)。
 
-查看日志：
-```bash
-# Claude Desktop 日志位置
-tail -f ~/Library/Logs/Claude/mcp-server-computer-use-enhanced.log
-```
+### 开发时直接运行源码
 
-### 自定义常量
-
-编辑 `src/utils-enhanced.ts`：
-```typescript
-// 修改这些常量
-const MOVE_SETTLE_MS = 50;           // 点击前等待时间
-const CLIPBOARD_PASTE_DELAY_MS = 100; // 粘贴后等待时间
-```
-
-重新编译生效。
-
----
-
-## 卸载 (Uninstall)
-
-### 1. 从 Claude Desktop 移除
-
-编辑 `~/.claude/settings.json`，删除：
 ```json
 {
   "mcpServers": {
-    // 删除这一段
-    "computer-use-enhanced": { ... }
+    "computer-use": {
+      "command": "npx",
+      "args": ["tsx", "/path/to/cc-computer-use/src/index.ts"]
+    }
   }
 }
 ```
 
-### 2. 删除项目文件
+修改源码后，需要在客户端里重新连接 MCP 服务器才能生效（tsx 不会自动重载已经运行的进程）。
+
+## 4. 系统权限
+
+macOS 的权限是授予**启动 MCP 服务器的那个应用**的，而不是 node 本身：
+
+| 使用方式 | 需要授权的应用 |
+|----------|----------------|
+| 在 Terminal 里运行 Claude Code | Terminal |
+| 在 iTerm2 里运行 Claude Code | iTerm2 |
+| Claude Desktop | Claude |
+| VS Code 集成终端 | Visual Studio Code |
+
+打开 **系统设置 → 隐私与安全性**：
+
+1. **屏幕录制**：打开上表中对应的应用。
+2. **辅助功能**：打开上表中对应的应用。
+3. **自动化**：首次操作时会弹窗询问是否允许控制 **System Events**（用于判断前台应用），点击允许。
+   之后 `open_application` 激活其他应用时，可能还会针对目标应用再询问一次。
+
+授予屏幕录制和辅助功能权限后，需要**完全退出并重新打开**该应用才会生效。
+
+## 5. 验证
 
 ```bash
-rm -rf ~/computer-use-mcp-server
+node test-tools.mjs
 ```
 
-### 3. 重启 Claude Desktop
+脚本会启动服务器并列出 24 个工具。如果缺少权限，它会打印具体缺哪一项以及怎么修复。
 
----
+然后在客户端里试一下：
 
-## 升级 (Upgrade)
+```
+申请控制 TextEdit，打开它并截一张图
+```
 
-### 从原版升级到增强版
+模型会依次调用 `request_access`、`open_application`、`screenshot`。
 
-1. **保留原版配置** (可选)
-2. **添加增强版配置**
-3. **重启 Claude Desktop**
-4. **测试新功能**
+真机的完整验证步骤见 [reports/TESTING.md](reports/TESTING.md#真机冒烟测试macos)。
 
-### 更新到最新版本
+## 故障排查
+
+### 启动失败
+
+服务器启动时会先做预检，失败时输出类似：
+
+```
+computer-use MCP server failed to start: Accessibility permission is not granted - cliclick cannot synthesize input.
+How to fix: System Settings > Privacy & Security > Accessibility: enable the app hosting this MCP server (Terminal / Claude), then restart it.
+```
+
+| 报错 | 处理 |
+|------|------|
+| `Screen Recording permission is not granted` | 开启屏幕录制权限，然后重启宿主应用 |
+| `Accessibility permission is not granted` | 开启辅助功能权限，然后重启宿主应用 |
+| `cliclick is not installed or not runnable` | `brew install cliclick`，然后用 `which cliclick` 确认在 PATH 中 |
+| `Could not determine display resolution` | 运行 `system_profiler SPDisplaysDataType`，确认输出中有 Resolution 行 |
+| `Implausible scale factor` | 显示器几何无法推导。请提交 issue，并附上 `system_profiler SPDisplaysDataType` 的输出 |
+
+Claude Desktop 的 MCP 日志位于 `~/Library/Logs/Claude/mcp-server-computer-use.log`。
+
+### 客户端里看不到工具
+
+1. 确认 `dist/index.js` 存在，没有的话运行 `npm run build`。
+2. 确认配置里的路径是绝对路径，并且指向 `dist/index.js`。
+3. Claude Code 中运行 `claude mcp list` 查看连接状态；Claude Desktop 需要完全退出后重新打开。
+
+### 工具返回错误码
+
+| 错误码 | 含义 | 处理 |
+|--------|------|------|
+| `needs_access` | 本会话还没有调用 `request_access` | 先调用 `request_access` |
+| `not_granted` | 前台应用不在白名单中，或无法确定前台应用 | 用 `request_access` 添加该应用，或把已授权的应用切到前台；如果一直无法确定前台应用，检查“自动化”中 System Events 的授权 |
+| `denied_tier` | 该应用属于 click（终端 / IDE）或 read（浏览器）分级 | 这是有意的限制，见 [README 的权限模型](README.md#权限模型) |
+| `needs_flag` | 需要额外授权 | 重新调用 `request_access`，带上 `clipboardRead` / `clipboardWrite` / `systemKeyCombos` |
+
+### 点击位置不准
+
+- 坐标总是相对于**最近一次** `screenshot`。界面变化后请重新截图。
+- 多显示器时，确认 `switch_display` 选中了目标应用所在的屏幕。
+- 如果误差随着离左上角越远而越大，说明缩放比推导有问题，请提交 issue 并附上
+  `system_profiler SPDisplaysDataType` 的输出和截图说明中的尺寸。
+
+### 输入中文或多行文本
+
+- 单行文本（包括中文）直接用 `type`。
+- 多行文本需要 `clipboardWrite` 授权，会通过剪贴板粘贴，完成后恢复原剪贴板内容。
+
+### 滚动报错
+
+`Failed to compile the Swift scroll helper`：运行 `xcode-select --install`。
+如果 macOS 升级后滚动失效，删除 `~/.cache/computer-use-mcp/cuscroll`，下次使用时会重新编译。
+
+## 卸载
 
 ```bash
-cd ~/computer-use-mcp-server
-
-# 备份当前版本
-cp -r src src.backup
-
-# 更新文件
-# (复制新的 src/index-enhanced.ts 和 src/utils-enhanced.ts)
-
-# 重新编译
-npm run build
-
-# 重启 Claude Desktop
+claude mcp remove computer-use           # 或从 Claude Desktop 配置中删除对应条目
+rm -rf ~/.cache/computer-use-mcp         # Swift helper 缓存
+rm -rf /path/to/cc-computer-use
 ```
 
----
-
-## 开发模式 (Development Mode)
-
-### 实时编译
-
-```bash
-# 终端1: 监听文件变化
-npm run build -- --watch
-```
-
-### 直接运行（测试）
-
-```bash
-# 不启动 MCP 服务器，而是测试某个函数
-npm run dev
-```
-
-编辑 `src/index-enhanced.ts` 添加测试代码：
-```typescript
-// 在文件末尾添加
-if (process.env.NODE_ENV === 'development') {
-  (async () => {
-    const screenInfo = await getScreenInfo();
-    console.log('Screen:', screenInfo);
-    
-    await moveMouseAndSettle(500, 300);
-    console.log('Moved to (500, 300)');
-  })();
-}
-```
-
----
-
-## 常见问题 (FAQ)
-
-### Q: 支持 Windows/Linux 吗？
-
-A: 目前仅支持 macOS。Windows/Linux 需要：
-- 替换 `screencapture` → 其他截图工具
-- 替换 `cliclick` → `xdotool` (Linux) 或 `AutoHotkey` (Windows)
-- 替换 `pbcopy/pbpaste` → 其他剪贴板工具
-
-### Q: 可以在其他 MCP 客户端使用吗？
-
-A: 可以！只要客户端支持 MCP 协议，就能使用这个服务器。
-
-### Q: 性能如何？
-
-A: 
-- 截图：~200ms
-- 鼠标移动：即时 (动画: 50-500ms)
-- 点击：即时
-- 输入：即时 (剪贴板: ~100ms)
-
-### Q: 安全吗？
-
-A: 
-- ✅ 本地运行，无网络请求
-- ✅ 需要系统权限确认
-- ✅ 开源代码，可审计
-- ⚠️ 授予辅助功能权限意味着可以控制整个系统
-
-### Q: 可以用于自动化测试吗？
-
-A: 可以！这就是设计目的之一。但建议：
-- 对生产环境使用专门的测试工具
-- 这个工具更适合 LLM 驱动的交互式操作
-
----
-
-## 获取帮助 (Get Help)
-
-### 文档
-- [README-ENHANCED.md](README-ENHANCED.md) - 功能介绍
-- [COMPARISON.md](COMPARISON.md) - 对比 CC-Source
-- [USAGE-EXAMPLES.md](USAGE-EXAMPLES.md) - 使用示例
-
-### 示例代码
-查看 `USAGE-EXAMPLES.md` 中的完整示例。
-
-### 调试
-1. 检查 Claude Desktop 日志
-2. 使用 `console.error()` 输出调试信息
-3. 测试单个工具功能
-
----
-
-**祝安装顺利！** 🎉
-
-如有问题，请先查看故障排查部分。
+最后在“隐私与安全性”中撤销相应应用的屏幕录制、辅助功能和自动化权限（可选）。
