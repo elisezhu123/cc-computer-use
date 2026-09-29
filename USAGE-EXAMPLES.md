@@ -1,570 +1,189 @@
-# 使用示例 (Usage Examples)
+# 使用示例
 
-## 基础示例 (Basic Examples)
+平时直接用自然语言描述任务就可以，模型会自己选择工具。
+下面列出的是模型实际发出的工具调用，方便理解每个工具的参数、调试时对照，或者在其他 MCP 客户端里直接调用。
 
-### 1. 截图 (Screenshot)
+坐标一律是 **最近一次 `screenshot` 返回的图片中的像素坐标**，服务器会负责换算到屏幕。
 
-```typescript
-// 基础截图
-{
-  "tool": "computer_screenshot",
-  "arguments": {
-    "output_path": "/tmp/screen.png"
-  }
-}
+## 1. 开始一个会话
 
-// 带缩放的截图
-{
-  "tool": "computer_screenshot",
-  "arguments": {
-    "output_path": "/tmp/screen_small.png",
-    "width": 1920,
-    "height": 1080
-  }
-}
+任何截图或输入操作之前，都必须先申请应用权限：
+
+```json
+{ "tool": "request_access", "arguments": {
+    "apps": ["TextEdit", "com.apple.Notes"],
+    "reason": "在 TextEdit 中整理会议记录，并从备忘录中复制内容",
+    "clipboardWrite": true
+} }
 ```
 
-### 2. 鼠标移动 (Mouse Movement)
+- `apps` 可以写显示名（不区分大小写），也可以写 bundle ID。
+- 无法识别的名字会在返回结果中单独列出，不会被悄悄忽略。
+- 多次调用时授权会累加。
 
-```typescript
-// 瞬间移动
-{
-  "tool": "computer_mouse_move",
-  "arguments": {
-    "x": 500,
-    "y": 300,
-    "animated": false
-  }
-}
+查看当前授权情况：
 
-// 动画移动（更自然，适合拖拽）
-{
-  "tool": "computer_mouse_move",
-  "arguments": {
-    "x": 500,
-    "y": 300,
-    "animated": true  // ✨ ease-out-cubic 60fps
-  }
-}
+```json
+{ "tool": "list_granted_applications", "arguments": {} }
 ```
 
-### 3. 点击 (Click)
+## 2. 看屏幕
 
-```typescript
-// 基础左键点击
-{
-  "tool": "computer_mouse_click",
-  "arguments": {
-    "x": 500,
-    "y": 300
-  }
-}
-
-// 右键点击
-{
-  "tool": "computer_mouse_click",
-  "arguments": {
-    "x": 500,
-    "y": 300,
-    "button": "right"
-  }
-}
-
-// 双击
-{
-  "tool": "computer_mouse_click",
-  "arguments": {
-    "x": 500,
-    "y": 300,
-    "double": true
-  }
-}
-
-// Cmd+Click（在新标签打开链接）
-{
-  "tool": "computer_mouse_click",
-  "arguments": {
-    "x": 500,
-    "y": 300,
-    "modifiers": ["command"]
-  }
-}
-
-// Shift+Click（选择范围）
-{
-  "tool": "computer_mouse_click",
-  "arguments": {
-    "x": 500,
-    "y": 300,
-    "modifiers": ["shift"]
-  }
-}
+```json
+{ "tool": "open_application", "arguments": { "app": "TextEdit" } }
+{ "tool": "screenshot", "arguments": {} }
 ```
 
----
+返回的说明文字里会写明图片尺寸，例如 `1372x891 pixels on "Built-in Retina Display"`，之后的坐标都基于这个尺寸。
 
-## 高级示例 (Advanced Examples)
+需要看清小字时，放大截图中的某个区域（不影响后续点击的坐标基准）：
 
-### 4. 文本输入 (Text Input)
-
-```typescript
-// 普通输入（短文本）
-{
-  "tool": "computer_type_text",
-  "arguments": {
-    "text": "Hello World",
-    "delay": 50
-  }
-}
-
-// 剪贴板输入（推荐：长文本、特殊字符、中文）
-{
-  "tool": "computer_type_text",
-  "arguments": {
-    "text": "这是一段很长的中文文本，包含特殊字符：¥€£ 和 emoji 🎉",
-    "via_clipboard": true  // ✨ 更可靠！
-  }
-}
-
-// 代码片段输入
-{
-  "tool": "computer_type_text",
-  "arguments": {
-    "text": "const hello = () => {\n  console.log('Hello');\n}",
-    "via_clipboard": true
-  }
-}
+```json
+{ "tool": "zoom", "arguments": { "region": [900, 0, 1372, 40] } }
 ```
 
-### 5. 按键操作 (Key Press)
+需要把截图发给用户时：
 
-```typescript
-// 单个按键
-{
-  "tool": "computer_press_key",
-  "arguments": {
-    "key": "return"
-  }
-}
-
-// 快捷键（新语法！）
-{
-  "tool": "computer_press_key",
-  "arguments": {
-    "key": "cmd+c"  // ✨ 支持 + 分隔符
-  }
-}
-
-// 复杂快捷键
-{
-  "tool": "computer_press_key",
-  "arguments": {
-    "key": "cmd+shift+a"  // 全选并高亮
-  }
-}
-
-// 重复按键（方向键导航）
-{
-  "tool": "computer_press_key",
-  "arguments": {
-    "key": "arrowdown",
-    "repeat": 5  // ✨ 8ms间隔，模拟USB键盘
-  }
-}
-
-// Tab键切换
-{
-  "tool": "computer_press_key",
-  "arguments": {
-    "key": "tab",
-    "repeat": 3
-  }
-}
+```json
+{ "tool": "screenshot", "arguments": { "save_to_disk": true } }
 ```
 
-### 6. 拖拽操作 (Drag) 🆕
+## 3. 鼠标
 
-```typescript
-// 拖动窗口
-{
-  "tool": "computer_drag",
-  "arguments": {
-    "from_x": 100,
-    "from_y": 50,   // 窗口标题栏
-    "to_x": 500,
-    "to_y": 300,
-    "animated": true  // ✨ 动画拖拽，更自然
-  }
-}
-
-// 调整窗口大小
-{
-  "tool": "computer_drag",
-  "arguments": {
-    "from_x": 800,
-    "from_y": 600,  // 窗口右下角
-    "to_x": 1200,
-    "to_y": 900,
-    "animated": true
-  }
-}
-
-// 拖动滚动条
-{
-  "tool": "computer_drag",
-  "arguments": {
-    "from_x": 1400,
-    "from_y": 200,  // 滚动条位置
-    "to_x": 1400,
-    "to_y": 600,
-    "animated": false  // 滚动条不需要动画
-  }
-}
-
-// 选择文本（拖拽选择）
-{
-  "tool": "computer_drag",
-  "arguments": {
-    "from_x": 200,
-    "from_y": 300,
-    "to_x": 600,
-    "to_y": 300,
-    "animated": true
-  }
-}
+```json
+{ "tool": "left_click",   "arguments": { "coordinate": [640, 420] } }
+{ "tool": "left_click",   "arguments": { "coordinate": [640, 420], "text": "cmd" } }
+{ "tool": "double_click", "arguments": { "coordinate": [300, 200] } }
+{ "tool": "triple_click", "arguments": { "coordinate": [300, 200] } }
+{ "tool": "right_click",  "arguments": { "coordinate": [300, 200] } }
+{ "tool": "mouse_move",   "arguments": { "coordinate": [500, 60] } }
 ```
 
-### 7. 滚动操作 (Scroll) 🆕
+第二行演示了点击时按住修饰键：点击的 `text` 参数表示点击期间按住的键，例如 `"cmd"` 或 `"shift+alt"`。
 
-```typescript
-// 向下滚动
-{
-  "tool": "computer_scroll",
-  "arguments": {
-    "x": 700,
-    "y": 400,
-    "dy": 5,   // 正数 = 向下
-    "dx": 0
-  }
-}
+拖拽（不写 `start_coordinate` 时从当前光标位置开始）：
 
-// 向上滚动
-{
-  "tool": "computer_scroll",
-  "arguments": {
-    "x": 700,
-    "y": 400,
-    "dy": -3,  // 负数 = 向上
-    "dx": 0
-  }
-}
-
-// 水平滚动
-{
-  "tool": "computer_scroll",
-  "arguments": {
-    "x": 700,
-    "y": 400,
-    "dy": 0,
-    "dx": 5   // 正数 = 向右
-  }
-}
-
-// 对角滚动
-{
-  "tool": "computer_scroll",
-  "arguments": {
-    "x": 700,
-    "y": 400,
-    "dy": 3,
-    "dx": 2
-  }
-}
+```json
+{ "tool": "left_click_drag", "arguments": { "start_coordinate": [100, 300], "coordinate": [600, 300] } }
 ```
 
----
+需要在按下和松开之间做其他操作时，分步执行：
 
-## 组合场景 (Combined Scenarios)
-
-### 场景1: 打开网页并搜索
-
-```typescript
-// 1. 打开浏览器（Spotlight搜索）
-{ "tool": "computer_press_key", "arguments": { "key": "cmd+space" } }
-{ "tool": "computer_type_text", "arguments": { "text": "Safari" } }
-{ "tool": "computer_press_key", "arguments": { "key": "return" } }
-
-// 等待浏览器打开...
-
-// 2. 点击地址栏
-{ "tool": "computer_mouse_click", "arguments": { "x": 700, "y": 50 } }
-
-// 3. 输入网址
-{ "tool": "computer_type_text", "arguments": { 
-  "text": "https://www.anthropic.com",
-  "via_clipboard": true 
-}}
-
-// 4. 回车
-{ "tool": "computer_press_key", "arguments": { "key": "return" } }
+```json
+{ "tool": "mouse_move",      "arguments": { "coordinate": [100, 300] } }
+{ "tool": "left_mouse_down", "arguments": {} }
+{ "tool": "mouse_move",      "arguments": { "coordinate": [600, 300] } }
+{ "tool": "left_mouse_up",   "arguments": {} }
 ```
 
-### 场景2: 填写表单
+## 4. 滚动
 
-```typescript
-// 1. 点击第一个输入框
-{ "tool": "computer_mouse_click", "arguments": { "x": 500, "y": 300 } }
-
-// 2. 输入姓名
-{ "tool": "computer_type_text", "arguments": { 
-  "text": "张三",
-  "via_clipboard": true 
-}}
-
-// 3. Tab到下一个字段
-{ "tool": "computer_press_key", "arguments": { "key": "tab" } }
-
-// 4. 输入邮箱
-{ "tool": "computer_type_text", "arguments": { 
-  "text": "zhangsan@example.com" 
-}}
-
-// 5. Tab到下一个字段
-{ "tool": "computer_press_key", "arguments": { "key": "tab" } }
-
-// 6. 输入多行文本
-{ "tool": "computer_type_text", "arguments": { 
-  "text": "这是一段\n多行的\n留言内容",
-  "via_clipboard": true 
-}}
-
-// 7. 点击提交按钮
-{ "tool": "computer_mouse_click", "arguments": { "x": 600, "y": 500 } }
+```json
+{ "tool": "scroll", "arguments": { "coordinate": [700, 500], "scroll_direction": "down", "scroll_amount": 5 } }
 ```
 
-### 场景3: 窗口管理
+`scroll_amount` 是滚轮的格数（每格约 40 像素）。
 
-```typescript
-// 1. 拖动窗口到屏幕中央
-{ "tool": "computer_drag", "arguments": {
-  "from_x": 200, "from_y": 50,
-  "to_x": 512, "to_y": 384,
-  "animated": true
-}}
+## 5. 键盘
 
-// 2. 调整窗口大小
-{ "tool": "computer_drag", "arguments": {
-  "from_x": 1024, "from_y": 768,
-  "to_x": 1200, "to_y": 900,
-  "animated": true
-}}
+输入文本（中文、emoji 都支持）：
 
-// 3. 最大化窗口（双击标题栏）
-{ "tool": "computer_mouse_click", "arguments": {
-  "x": 512, "y": 50,
-  "double": true
-}}
+```json
+{ "tool": "type", "arguments": { "text": "你好，世界 👋" } }
 ```
 
-### 场景4: 文本编辑
+多行文本会通过剪贴板粘贴，需要事先获得 `clipboardWrite` 授权，粘贴完成后会恢复原来的剪贴板内容：
 
-```typescript
-// 1. 全选
-{ "tool": "computer_press_key", "arguments": { "key": "cmd+a" } }
-
-// 2. 复制
-{ "tool": "computer_press_key", "arguments": { "key": "cmd+c" } }
-
-// 3. 点击新位置
-{ "tool": "computer_mouse_click", "arguments": { "x": 700, "y": 400 } }
-
-// 4. 粘贴
-{ "tool": "computer_press_key", "arguments": { "key": "cmd+v" } }
-
-// 5. 向下移动光标5次
-{ "tool": "computer_press_key", "arguments": { 
-  "key": "arrowdown", 
-  "repeat": 5 
-}}
-
-// 6. Shift+End选择到行尾
-{ "tool": "computer_press_key", "arguments": { "key": "shift+end" } }
+```json
+{ "tool": "type", "arguments": { "text": "第一行\n第二行\n第三行" } }
 ```
 
-### 场景5: 网页长截图
+按键和组合键：
 
-```typescript
-// 1. 截取当前视窗
-{ "tool": "computer_screenshot", "arguments": { 
-  "output_path": "/tmp/page_1.png" 
-}}
-
-// 2. 向下滚动
-{ "tool": "computer_scroll", "arguments": {
-  "x": 700, "y": 400,
-  "dy": 10
-}}
-
-// 等待页面渲染...
-
-// 3. 截取第二屏
-{ "tool": "computer_screenshot", "arguments": { 
-  "output_path": "/tmp/page_2.png" 
-}}
-
-// 4. 继续滚动
-{ "tool": "computer_scroll", "arguments": {
-  "x": 700, "y": 400,
-  "dy": 10
-}}
-
-// 5. 截取第三屏
-{ "tool": "computer_screenshot", "arguments": { 
-  "output_path": "/tmp/page_3.png" 
-}}
+```json
+{ "tool": "key", "arguments": { "text": "return" } }
+{ "tool": "key", "arguments": { "text": "cmd+s" } }
+{ "tool": "key", "arguments": { "text": "ctrl+shift+tab" } }
+{ "tool": "key", "arguments": { "text": "down", "repeat": 5 } }
 ```
 
----
+常用键名：`return`、`escape`、`tab`、`space`、`backspace`、`delete`、`up` / `down` / `left` / `right`、
+`pageup`、`pagedown`、`home`、`end`、`f1`–`f12`。
+修饰键：`cmd`（`command`）、`ctrl`（`control`）、`alt`（`option`）、`shift`、`fn`。
 
-## 最佳实践 (Best Practices)
+按住一段时间（单位为秒）：
 
-### ✅ 推荐做法
-
-1. **长文本用剪贴板**
-   ```typescript
-   { "via_clipboard": true }  // 超过50字符时推荐
-   ```
-
-2. **拖拽用动画**
-   ```typescript
-   { "animated": true }  // 让系统更好地识别拖拽
-   ```
-
-3. **快捷键用新语法**
-   ```typescript
-   { "key": "cmd+c" }  // 而不是手动指定modifiers
-   ```
-
-4. **点击前等待**
-   ```typescript
-   // 工具已内置50ms settle时间，无需手动等待
-   ```
-
-### ❌ 避免做法
-
-1. **不要在短时间内重复截图**
-   ```typescript
-   // 错误：screencapture需要时间
-   screenshot(); screenshot(); screenshot();
-   
-   // 正确：加入适当延迟
-   screenshot(); await sleep(200); screenshot();
-   ```
-
-2. **不要忽略动画标志**
-   ```typescript
-   // 拖拽时使用animated: false可能导致失败
-   ```
-
-3. **不要硬编码坐标**
-   ```typescript
-   // 错误：不同分辨率会失败
-   { "x": 500, "y": 300 }
-   
-   // 正确：先获取屏幕信息
-   const info = getScreenInfo();
-   { "x": info.width / 2, "y": info.height / 2 }
-   ```
-
----
-
-## 性能提示 (Performance Tips)
-
-### 延迟时间参考
-
-| 操作 | 内置延迟 | 推荐额外等待 |
-|-----|---------|-------------|
-| 鼠标移动后 | 50ms | 0ms |
-| 点击后 | 0ms | 100-200ms |
-| 按键后 | 0ms | 50-100ms |
-| 剪贴板粘贴后 | 100ms | 0ms |
-| 截图后 | 0ms | 200ms |
-| 滚动后 | 0ms | 100ms |
-| 拖拽后 | 0ms | 200ms |
-
-### 速度优化
-
-```typescript
-// 慢速（每个操作都截图验证）
-click(); screenshot(); 
-type(); screenshot(); 
-press(); screenshot();
-
-// 快速（批量操作后验证）
-click(); 
-type(); 
-press(); 
-screenshot();
+```json
+{ "tool": "hold_key", "arguments": { "text": "shift+down", "duration": 1.5 } }
 ```
 
----
+⌘Q、⌘Tab、⌘Space 等系统快捷键需要 `systemKeyCombos` 授权，否则返回 `needs_flag`。
 
-## 调试技巧 (Debugging Tips)
+## 6. 批处理
 
-### 1. 定位问题
+可以预见结果的连续操作，放进一个 `computer_batch`，只需要一次模型往返：
 
-```typescript
-// 先获取屏幕信息
-{ "tool": "computer_get_screen_info" }
-
-// 获取当前鼠标位置
-{ "tool": "computer_get_mouse_position" }
-
-// 截图确认状态
-{ "tool": "computer_screenshot", "arguments": {
-  "output_path": "/tmp/debug.png"
-}}
+```json
+{ "tool": "computer_batch", "arguments": { "actions": [
+    { "action": "left_click", "coordinate": [640, 120] },
+    { "action": "key", "text": "cmd+a" },
+    { "action": "type", "text": "会议记录 2026-09-29" },
+    { "action": "key", "text": "return" },
+    { "action": "wait", "duration": 0.5 },
+    { "action": "screenshot" }
+] } }
 ```
 
-### 2. 测试坐标
+- 按顺序执行，遇到第一个错误就停止，并返回此前已完成的步骤。
+- 所有坐标都基于**批次开始前**的那张截图。
+- 每一步都会单独检查前台应用。
 
-```typescript
-// 移动到目标位置（不点击）
-{ "tool": "computer_mouse_move", "arguments": {
-  "x": 500, "y": 300,
-  "animated": true
-}}
+## 7. 剪贴板
 
-// 截图确认位置正确
-{ "tool": "computer_screenshot", "arguments": {
-  "output_path": "/tmp/position_check.png"
-}}
-
-// 确认后再点击
-{ "tool": "computer_mouse_click", "arguments": {
-  "x": 500, "y": 300
-}}
+```json
+{ "tool": "read_clipboard",  "arguments": {} }
+{ "tool": "write_clipboard", "arguments": { "text": "要复制的内容" } }
 ```
 
-### 3. AppleScript调试
+分别需要 `clipboardRead` / `clipboardWrite` 授权。
 
-```typescript
-// 获取前台应用
-{ "tool": "computer_run_applescript", "arguments": {
-  "script": "tell application \"System Events\" to get name of first application process whose frontmost is true"
-}}
+## 8. 多显示器
 
-// 获取窗口位置
-{ "tool": "computer_run_applescript", "arguments": {
-  "script": "tell application \"System Events\" to get position of window 1 of process \"Safari\""
-}}
+截图的说明文字会列出其他显示器。切换方式：
 
-// 获取窗口大小
-{ "tool": "computer_run_applescript", "arguments": {
-  "script": "tell application \"System Events\" to get size of window 1 of process \"Safari\""
-}}
+```json
+{ "tool": "switch_display", "arguments": { "display": "2" } }
+{ "tool": "switch_display", "arguments": { "display": "DELL U2720Q" } }
+{ "tool": "switch_display", "arguments": { "display": "auto" } }
 ```
 
----
+切换后需要重新截图，之后的坐标以新显示器的截图为准。
 
-**提示：所有示例都可以直接在Claude Desktop中使用！** 🚀
+## 9. 完整示例：在备忘录中新建一条笔记
+
+```text
+用户：在备忘录里新建一条笔记，标题“购物清单”，内容是牛奶、鸡蛋、面包，每项一行。
+```
+
+```json
+{ "tool": "request_access", "arguments": { "apps": ["Notes"], "reason": "新建购物清单笔记", "clipboardWrite": true } }
+{ "tool": "open_application", "arguments": { "app": "Notes" } }
+{ "tool": "screenshot", "arguments": {} }
+{ "tool": "computer_batch", "arguments": { "actions": [
+    { "action": "key", "text": "cmd+n" },
+    { "action": "wait", "duration": 0.5 },
+    { "action": "type", "text": "购物清单\n牛奶\n鸡蛋\n面包" },
+    { "action": "screenshot" }
+] } }
+```
+
+## 10. 会被拒绝的操作
+
+| 操作 | 返回 | 原因 |
+|------|------|------|
+| 未调用 `request_access` 就截图 | `needs_access` | 必须先申请 |
+| Finder 在前台时点击，但只授权了 TextEdit | `not_granted` | 前台应用不在白名单中 |
+| 在 Terminal 中 `type` | `denied_tier` | 终端只允许点击 |
+| 在 Safari 中点击 | `denied_tier` | 浏览器只允许查看 |
+| `key` `cmd+q`（未授予 `systemKeyCombos`） | `needs_flag` | 系统级快捷键 |
+| 多行 `type`（未授予 `clipboardWrite`） | `needs_flag` | 多行输入需要剪贴板 |

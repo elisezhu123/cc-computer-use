@@ -14,6 +14,9 @@
   新的 `src/http-server.ts` 复用 `server.ts`，提供 Streamable HTTP（`/mcp`）和 SSE（`/sse`）两种传输，
   每个客户端会话独立，默认只监听 `127.0.0.1` 并启用 DNS rebinding 防护。
 - `start-gateway.sh` 原先在自身所在的子目录里找 `dist/`，现改为切到项目根目录。
+- 启动预检失败时，同时打印 `PreflightError` 附带的修复方法（之前只打印了错误信息）。
+- 按键支持 xdotool 风格的键名（`Down`、`Page_Down`、`Prior`、`super` 等），
+  这正是官方 computer-use 使用的写法；之前 `key "Down"` 会被 cliclick 拒绝。
 - 未安装 `cliclick` 时，`input.test.ts` 中依赖真实 cliclick 的 4 个测试改为明确跳过，
   不再出现“空跑通过”或误报失败。
 
