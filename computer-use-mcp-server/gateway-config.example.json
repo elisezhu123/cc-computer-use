@@ -1,0 +1,24 @@
+{
+  "mcpGateways": {
+    "computer-use-streamable-http": {
+      "comment": "推荐：Streamable HTTP 模式 - 最新的标准",
+      "command": "/Users/elise123/Tools/Claude/computer-use-mcp-server/start-gateway.sh",
+      "transport": "streamable-http",
+      "url": "http://localhost:3100/sse"
+    },
+    "computer-use-sse-legacy": {
+      "comment": "SSE (legacy) 模式 - 旧版兼容",
+      "command": "/Users/elise123/Tools/Claude/computer-use-mcp-server/start-gateway.sh",
+      "transport": "sse",
+      "url": "http://localhost:3100/sse"
+    },
+    "computer-use-stdio": {
+      "comment": "Local command (stdio) 模式 - 直接启动进程",
+      "command": "node",
+      "args": [
+        "/Users/elise123/Tools/Claude/computer-use-mcp-server/dist/index.js"
+      ],
+      "transport": "stdio"
+    }
+  }
+}
