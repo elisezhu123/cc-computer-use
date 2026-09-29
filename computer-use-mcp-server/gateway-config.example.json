@@ -1,24 +1,22 @@
 {
   "mcpGateways": {
+    "computer-use-stdio": {
+      "comment": "推荐：Local command (stdio) - 直接启动进程，无需 HTTP 服务",
+      "command": "node",
+      "args": ["/path/to/cc-computer-use/dist/index.js"],
+      "transport": "stdio"
+    },
     "computer-use-streamable-http": {
-      "comment": "推荐：Streamable HTTP 模式 - 最新的标准",
-      "command": "/Users/elise123/Tools/Claude/computer-use-mcp-server/start-gateway.sh",
+      "comment": "Streamable HTTP - 先运行 computer-use-mcp-server/start-gateway.sh",
+      "command": "/path/to/cc-computer-use/computer-use-mcp-server/start-gateway.sh",
       "transport": "streamable-http",
-      "url": "http://localhost:3100/sse"
+      "url": "http://127.0.0.1:3100/mcp"
     },
     "computer-use-sse-legacy": {
-      "comment": "SSE (legacy) 模式 - 旧版兼容",
-      "command": "/Users/elise123/Tools/Claude/computer-use-mcp-server/start-gateway.sh",
+      "comment": "SSE (legacy) - 仅用于兼容旧客户端",
+      "command": "/path/to/cc-computer-use/computer-use-mcp-server/start-gateway.sh",
       "transport": "sse",
-      "url": "http://localhost:3100/sse"
-    },
-    "computer-use-stdio": {
-      "comment": "Local command (stdio) 模式 - 直接启动进程",
-      "command": "node",
-      "args": [
-        "/Users/elise123/Tools/Claude/computer-use-mcp-server/dist/index.js"
-      ],
-      "transport": "stdio"
+      "url": "http://127.0.0.1:3100/sse"
     }
   }
 }

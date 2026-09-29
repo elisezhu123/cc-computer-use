@@ -1,21 +1,23 @@
 #!/bin/bash
+# Start the computer-use MCP server in HTTP gateway mode.
+#
+#   Streamable HTTP: http://127.0.0.1:$PORT/mcp
+#   SSE (legacy):    http://127.0.0.1:$PORT/sse
+#
+# PORT defaults to 3100, HOST to 127.0.0.1. Do not set HOST to a public
+# interface: the gateway has no authentication.
 
-# Computer Use MCP Server - Gateway Mode Startup Script
-# This script starts the HTTP server for Claude Code Gateway integration
+set -euo pipefail
 
-PORT=${PORT:-3100}
+export PORT="${PORT:-3100}"
+export HOST="${HOST:-127.0.0.1}"
 
-echo "Starting Computer Use MCP Server in Gateway mode..." >&2
-echo "Port: $PORT" >&2
+# This script lives in computer-use-mcp-server/; the project root is its parent.
+cd "$(dirname "$0")/.."
 
-cd "$(dirname "$0")"
-
-# Build if needed
-if [ ! -d "dist" ]; then
+if [ ! -f dist/http-server.js ]; then
   echo "Building TypeScript..." >&2
-  npm run build
+  npm run build >&2
 fi
 
-# Start the HTTP server
-export PORT
 exec node dist/http-server.js

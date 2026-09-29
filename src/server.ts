@@ -628,12 +628,29 @@ function reqCoord(args: Record<string, unknown>): number[] {
 
 // ── Wiring ───────────────────────────────────────────────────────────────────
 
-export async function createServer(): Promise<{ server: Server; ctx: ServerContext }> {
-  await preflightPermissions();
+/** Machine facts shared by every session: measured once, never per request. */
+export interface ServerEnvironment {
+  displays: AttachedDisplay[];
+  installed: InstalledApp[];
+}
 
+export async function loadEnvironment(): Promise<ServerEnvironment> {
+  await preflightPermissions();
   const displays = await detectDisplays();
-  const main = displays.find((d) => d.isMain) ?? displays[0]!;
   const installed = await listInstalledApps();
+  return { displays, installed };
+}
+
+/**
+ * One MCP Server with its own session state (allowlist, grants, screenshot
+ * basis). The HTTP gateway calls this once per client session with a shared
+ * environment, so no client inherits another's grants.
+ */
+export async function createServer(
+  env?: ServerEnvironment,
+): Promise<{ server: Server; ctx: ServerContext }> {
+  const { displays, installed } = env ?? (await loadEnvironment());
+  const main = displays.find((d) => d.isMain) ?? displays[0]!;
 
   const ctx: ServerContext = {
     displays,
