@@ -30,6 +30,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
 import { createServer, loadEnvironment, type ServerEnvironment } from './server.js';
 import { closeScrollHelper } from './scroll.js';
+import { PreflightError } from './display.js';
 
 const PORT = Number(process.env.PORT ?? 3100);
 const HOST = process.env.HOST ?? '127.0.0.1';
@@ -152,8 +153,8 @@ export async function startHttpServer(env: ServerEnvironment): Promise<void> {
 loadEnvironment()
   .then(startHttpServer)
   .catch((error: unknown) => {
-    process.stderr.write(
-      `computer-use MCP gateway failed to start: ${error instanceof Error ? error.message : String(error)}\n`,
-    );
+    const message = error instanceof Error ? error.message : String(error);
+    const remedy = error instanceof PreflightError ? `\nHow to fix: ${error.remedy}` : '';
+    process.stderr.write(`computer-use MCP gateway failed to start: ${message}${remedy}\n`);
     process.exit(1);
   });
