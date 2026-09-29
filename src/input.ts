@@ -60,6 +60,17 @@ const KEY_MAP: Readonly<Record<string, string>> = {
   'arrow-left': 'arrow-left',
   arrowright: 'arrow-right',
   'arrow-right': 'arrow-right',
+  // xdotool-style names, which the official computer-use tool vocabulary uses
+  // ("Down", "Page_Down", "super"). Unmapped, "down" would reach cliclick as
+  // kp:down and be rejected.
+  up: 'arrow-up',
+  down: 'arrow-down',
+  left: 'arrow-left',
+  right: 'arrow-right',
+  page_up: 'page-up',
+  page_down: 'page-down',
+  prior: 'page-up',
+  next: 'page-down',
   return: 'return',
   enter: 'return',
   tab: 'tab',
@@ -68,6 +79,7 @@ const KEY_MAP: Readonly<Record<string, string>> = {
   command: 'cmd',
   cmd: 'cmd',
   meta: 'cmd',
+  super: 'cmd',
   control: 'ctrl',
   ctrl: 'ctrl',
   option: 'alt',

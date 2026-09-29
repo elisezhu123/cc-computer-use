@@ -60,6 +60,12 @@ test('toCliclickKey maps the model vocabulary onto cliclick names', () => {
   assert.equal(toCliclickKey('meta'), 'cmd');
   assert.equal(toCliclickKey('control'), 'ctrl');
   assert.equal(toCliclickKey('option'), 'alt');
+  assert.equal(toCliclickKey('Down'), 'arrow-down', 'xdotool-style arrow names');
+  assert.equal(toCliclickKey('left'), 'arrow-left');
+  assert.equal(toCliclickKey('Page_Down'), 'page-down', 'xdotool-style page names');
+  assert.equal(toCliclickKey('Prior'), 'page-up');
+  assert.equal(toCliclickKey('super'), 'cmd');
+  assert.deepEqual(parseChord('super+shift+Up'), { mods: ['cmd', 'shift'], keys: ['arrow-up'] });
   assert.equal(toCliclickKey('A'), 'a', 'single characters pass through lowercased');
 });
 
@@ -84,6 +90,7 @@ test('chordModifiers returns only modifiers', () => {
 test('cliclick accepts every special-key and character token we emit', { skip: NO_CLICLICK }, async () => {
   const keys = ['return', 'escape', 'tab', 'space', 'backspace', 'delete', 'forward-delete',
     'pageup', 'pagedown', 'home', 'end', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright',
+    'up', 'down', 'left', 'right', 'page_up', 'page_down',
     'f1', 'f12', 'a', 'Z', '0', '9', '/', '.', '-', '=', '[', ']'];
   const rejects: string[] = [];
   for (const k of keys) {
