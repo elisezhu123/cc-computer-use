@@ -7,6 +7,17 @@ import { parseChord, toCliclickKey, chordModifiers } from './input.js';
 const execFileAsync = promisify(execFile);
 
 /**
+ * The argv checks below need the real cliclick binary (macOS only). Without it
+ * every call fails with ENOENT, which cliclickRejects reads as "accepted" - the
+ * accept tests would pass vacuously and the reject tests would fail. Skip them
+ * explicitly instead.
+ */
+const NO_CLICLICK = await execFileAsync('cliclick', ['-V']).then(
+  () => false,
+  (e: NodeJS.ErrnoException) => (e.code === 'ENOENT' ? 'cliclick is not installed (brew install cliclick)' : false),
+);
+
+/**
  * Ask cliclick itself whether it accepts an argv, via `-m test` (print the
  * action, perform nothing). This is the authoritative check: it is the real
  * binary's real parser, not a copy of its key list that could drift.
@@ -70,7 +81,7 @@ test('chordModifiers returns only modifiers', () => {
 
 // ── Every emitted argv is checked against the real cliclick binary ───────────
 
-test('cliclick accepts every special-key and character token we emit', async () => {
+test('cliclick accepts every special-key and character token we emit', { skip: NO_CLICLICK }, async () => {
   const keys = ['return', 'escape', 'tab', 'space', 'backspace', 'delete', 'forward-delete',
     'pageup', 'pagedown', 'home', 'end', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright',
     'f1', 'f12', 'a', 'Z', '0', '9', '/', '.', '-', '=', '[', ']'];
@@ -86,7 +97,7 @@ test('cliclick accepts every special-key and character token we emit', async () 
   assert.deepEqual(rejects, [], `cliclick rejected:\n${rejects.join('\n')}`);
 });
 
-test('cliclick accepts every modifier combination we emit', async () => {
+test('cliclick accepts every modifier combination we emit', { skip: NO_CLICLICK }, async () => {
   const chords = ['cmd+a', 'cmd+shift+q', 'ctrl+alt+delete', 'cmd+option+escape',
     'shift+tab', 'cmd+tab', 'ctrl+shift+tab', 'alt+f4', 'cmd+space', 'cmd+shift+4'];
   const rejects: string[] = [];
@@ -98,7 +109,7 @@ test('cliclick accepts every modifier combination we emit', async () => {
   assert.deepEqual(rejects, [], `cliclick rejected:\n${rejects.join('\n')}`);
 });
 
-test('modifiers are never emitted through kp: (the bug that broke every combo)', async () => {
+test('modifiers are never emitted through kp: (the bug that broke every combo)', { skip: NO_CLICLICK }, async () => {
   // kp: is press-and-release; a modifier sent that way is an error, and the
   // original implementation sent every part that way.
   for (const m of ['cmd', 'ctrl', 'alt', 'shift', 'fn']) {
@@ -107,7 +118,7 @@ test('modifiers are never emitted through kp: (the bug that broke every combo)',
   }
 });
 
-test('letters are never emitted through kp: (also rejected)', async () => {
+test('letters are never emitted through kp: (also rejected)', { skip: NO_CLICLICK }, async () => {
   for (const ch of ['a', 'z', '0', '9']) {
     const bad = await cliclickRejects([`kp:${ch}`]);
     assert.ok(bad !== null, `cliclick unexpectedly accepted kp:${ch}`);
