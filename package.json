@@ -1,0 +1,47 @@
+{
+  "name": "computer-use-mcp-server",
+  "version": "3.0.0",
+  "description": "macOS computer-use MCP server that mirrors the Claude Code computer-use tool contract, driven by cliclick",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "computer-use-mcp": "dist/index.js",
+    "computer-use-mcp-gateway": "dist/http-server.js"
+  },
+  "scripts": {
+    "build": "tsc && npm run copy-native",
+    "clean": "rm -rf dist",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "tsc && node --test dist/*.test.js",
+    "typecheck": "tsc --noEmit",
+    "copy-native": "mkdir -p dist/native && cp src/native/*.swift dist/native/",
+    "start:gateway": "node dist/http-server.js",
+    "dev:gateway": "tsx src/http-server.ts"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "express": "^5.2.1",
+    "sharp": "^0.33.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "keywords": [
+    "mcp",
+    "computer-use",
+    "automation",
+    "claude",
+    "anthropic",
+    "macos",
+    "cliclick"
+  ],
+  "license": "MIT"
+}
