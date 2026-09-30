@@ -178,21 +178,31 @@ async function doClick(
   }
 
   const p = toLogical(ctx, coord[0]!, coord[1]!);
-  await input.moveMouse(p.x, p.y);
-  await input.click(button, count, mods);
+  await input.moveAndClick(p.x, p.y, button, count, mods);
   return text(
     `Clicked ${button}${count > 1 ? ` x${count}` : ''} at screenshot (${coord[0]}, ${coord[1]}) ` +
       `= logical (${p.x}, ${p.y}).`,
   );
 }
 
+/** Above this length, pasting is much faster than cliclick typing each character. */
+const PASTE_THRESHOLD_CHARS = 200;
+
 /**
  * Type text. Multi-line text goes through the clipboard: cliclick's `t:` does
  * not translate newlines into Return, so a multi-line string would arrive as
- * one line. Requires the clipboardWrite grant.
+ * one line. Requires the clipboardWrite grant. Long single-line text also
+ * takes the clipboard path when that grant exists, for speed.
  */
 async function doType(ctx: ServerContext, value: string): Promise<ToolResult> {
   await guard(ctx, 'type');
+
+  if (!value.includes('\n') && value.length > PASTE_THRESHOLD_CHARS && ctx.session.grants.clipboardWrite) {
+    await pasteText(value, async () => {
+      await input.pressChord('cmd+v');
+    });
+    return text(`Typed ${value.length} characters via the clipboard.`);
+  }
 
   if (value.includes('\n')) {
     if (!ctx.session.grants.clipboardWrite) {
@@ -260,8 +270,9 @@ async function doBatch(
           await guard(ctx, 'click');
           if (!coord) throw new Error(`${action} requires a coordinate.`);
           const p = toLogical(ctx, coord[0]!, coord[1]!);
-          await input.moveMouse(p.x, p.y);
-          await input.click(
+          await input.moveAndClick(
+            p.x,
+            p.y,
             button,
             count as 1 | 2 | 3,
             a.text ? input.chordModifiers(String(a.text)) : [],
