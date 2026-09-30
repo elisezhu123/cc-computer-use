@@ -41,7 +41,18 @@ src/
 ├── clipboard.ts      剪贴板读写与“粘贴后恢复”
 ├── apps.ts           已安装应用枚举、前台应用、激活、描述过滤
 ├── types.ts          共享类型
-└── native/scroll.swift
+├── native/scroll.swift
+│
+│   后台模式（见 BACKGROUND.md）
+├── driverServer.ts   后台模式共用层：坐标换算、zoom、批处理、结果格式
+├── browser.ts        浏览器模式入口
+├── browser-server.ts 浏览器驱动（Playwright / Chrome DevTools 协议）
+├── browserKeys.ts    键名 → Playwright 键名
+├── background.ts     原生后台模式入口（实验性）
+├── background-server.ts 原生驱动：CGEventPostToPid + 窗口截图
+├── nativeKeys.ts     键名 → macOS 虚拟键码与修饰键标志
+├── nativeHelper.ts   background.swift 进程管理
+└── native/background.swift
 ```
 
 `tools.ts` 只负责 schema，`server.ts` 只负责执行，与官方包的分工一致。
@@ -211,6 +222,25 @@ helper 会回复 `ok` / `err`，静默失败会被报告为工具错误。
 |------|------|------|
 | `dist/index.js` | stdio | 默认；由 MCP 客户端直接启动 |
 | `dist/http-server.js` | Streamable HTTP（`/mcp`）+ SSE（`/sse`） | 只能通过 HTTP 接入的客户端 |
+| `dist/browser.js` | stdio | 浏览器模式 |
+| `dist/background.js` | stdio | 原生后台模式（实验性） |
+
+## 后台模式
+
+桌面模式发送的是系统全局事件，会占用用户的鼠标键盘。两种后台模式换了事件的投递目标，工具契约不变：
+
+| | 浏览器模式 | 原生后台模式 |
+|--|------------|--------------|
+| 输入 | Playwright → Chrome DevTools 协议，事件直接进入网页 | `CGEventPostToPid`，事件直接进入目标进程 |
+| 截图 | 网页可视区域 | 目标应用窗口（`screencapture -l`） |
+| 坐标单位 | CSS 像素 | 窗口内的点（点击前加上窗口当前的屏幕坐标） |
+| 权限 | 不需要 macOS 权限 | 屏幕录制 + 辅助功能 |
+
+两者共用 `driverServer.ts`：每种模式只实现一个 `Driver`（截图、点击、移动、按下/松开、拖拽、输入、按键、按住、滚动这几个原语），
+截图缩放、坐标换算、`zoom`、`computer_batch` 和结果格式都由共用层处理，因此两种模式的行为一致。
+
+`background.swift` 编译为独立的二进制（`~/.cache/computer-use-mcp/cubg-<源码哈希>`），与滚动小工具分开：
+它编译失败不会影响桌面模式；源码更新后会按新哈希重新编译。
 
 两者都调用 `server.ts` 的 `createServer()`，工具和策略完全相同。
 HTTP 模式下每个客户端会话有独立的会话状态；默认只监听 `127.0.0.1`，并启用 DNS rebinding 防护。

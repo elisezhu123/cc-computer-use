@@ -2,6 +2,11 @@
 
 ## 未发布
 
+### 新增
+- **浏览器模式**（`dist/browser.js`）：通过 Chrome DevTools 协议控制一个独立的 Chrome，不占用系统鼠标键盘；窗口被遮挡、最小化或无界面时照常工作，后台不节流。新增 `navigate` 工具。
+- **原生后台模式**（`dist/background.js`，实验性）：用 `CGEventPostToPid` 把输入直接发给指定应用、只截取该应用窗口，不移动光标。
+- 新增 [BACKGROUND.md](../BACKGROUND.md)，介绍上述两种模式和在虚拟机里运行的方法。
+
 ### 性能
 - 前台应用检查改用 `lsappinfo`，不再每个动作都向 System Events 发 Apple Event；同时不再需要 System Events 的自动化授权（`osascript` 仅作回退）。
 - 点击的移动、稳定等待、点击合并为一次 cliclick 调用。
