@@ -60,7 +60,7 @@ Coordinates refer to the screenshot taken before the batch.
 |------|---------|-----------|
 | `needs_access` | `request_access` not called yet | Call it |
 | `not_granted` | Frontmost app is not in the allowlist | Bring an allowed app to the front, or request access to this one |
-| `denied_tier` | Terminals/IDEs are click-only; browsers are view-only | Do not work around it - tell the user |
+| `denied_tier` | Only with CU_STRICT_APP_TIERS=1: terminals/IDEs are click-only, browsers view-only | Do not work around it - tell the user |
 | `needs_flag` | Clipboard or system shortcut (Cmd+Q, Cmd+Tab...) not granted | Re-call `request_access` with the flag only if the user agrees |
 
 ## Safety

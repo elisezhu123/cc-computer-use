@@ -258,6 +258,37 @@ export async function click(
 }
 
 /**
+ * Move, settle, then click - in ONE cliclick process. Equivalent to
+ * moveMouse() + click(), but cliclick's own `w:` wait replaces the JS-side
+ * settle and the second process spawn, which is the slow part of a click.
+ */
+export async function moveAndClick(
+  x: number,
+  y: number,
+  button: 'left' | 'right',
+  count: 1 | 2 | 3,
+  modifiers: string[] = [],
+): Promise<void> {
+  await cliclick(moveAndClickArgs(x, y, button, count, modifiers));
+}
+
+/** The argv moveAndClick sends; exported so tests can check it against cliclick. */
+export function moveAndClickArgs(
+  x: number,
+  y: number,
+  button: 'left' | 'right',
+  count: 1 | 2 | 3,
+  modifiers: string[] = [],
+): string[] {
+  const mods = modifiers.map(toCliclickKey).filter((m) => MODIFIER_KEYS.has(m));
+  const args: string[] = [`m:${Math.round(x)},${Math.round(y)}`, `w:${MOVE_SETTLE_MS}`];
+  if (mods.length > 0) args.push(`kd:${mods.join(',')}`);
+  args.push(...clickToken(button, count, '.').split(' '));
+  if (mods.length > 0) args.push(`ku:${[...mods].reverse().join(',')}`);
+  return args;
+}
+
+/**
  * Press-and-hold at the current position, then release separately. cliclick's
  * dd:/du: pair only models a drag; holding still is achieved by issuing no
  * movement between them. Only the left button is supported - cliclick has no

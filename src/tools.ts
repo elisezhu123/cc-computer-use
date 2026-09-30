@@ -22,7 +22,7 @@ const coordinateTuple = {
   description: `(x, y): ${COORD_DESC.x} ${COORD_DESC.y}`,
 };
 
-const FRONTMOST_GATE_DESC =
+export const FRONTMOST_GATE_DESC =
   'The frontmost application must be in the session allowlist at the time of this call, or this tool returns an error and does nothing.';
 
 const clickModifierText = {
@@ -86,7 +86,7 @@ export function buildComputerUseTools(installedAppNames: readonly string[]): Too
             description: 'One-sentence explanation of the task. Shown to the user.',
           },
           clipboardRead: { type: 'boolean', description: 'Also grant reading the clipboard.' },
-          clipboardWrite: { type: 'boolean', description: 'Also grant writing the clipboard. When granted, multi-line `type` calls use the clipboard fast path.' },
+          clipboardWrite: { type: 'boolean', description: 'Also grant writing the clipboard. When granted, multi-line and long (over 200 characters) `type` calls use the faster clipboard paste path.' },
           systemKeyCombos: { type: 'boolean', description: 'Also grant system-level key combos (quit app, switch app, lock screen). Without this those specific combos are refused.' },
         },
         required: ['apps', 'reason'],

@@ -40,8 +40,16 @@ const READ_ONLY_BUNDLE_IDS: ReadonlySet<string> = new Set([
   'company.thebrowser.Browser',
 ]);
 
-export function tierForApp(bundleId: string | null): AppTier {
-  if (bundleId === null) return 'full';
+/**
+ * Tiers are opt-in. By default every granted app is fully interactive -
+ * browsers included - so the allowlist, the frontmost gate and the system-key
+ * blocklist are the boundary. Set CU_STRICT_APP_TIERS=1 to restore the
+ * official build's restrictions: browsers view-only, shells click-only.
+ */
+export const STRICT_APP_TIERS = /^(1|true|yes)$/i.test(process.env.CU_STRICT_APP_TIERS ?? '');
+
+export function tierForApp(bundleId: string | null, strict = STRICT_APP_TIERS): AppTier {
+  if (!strict || bundleId === null) return 'full';
   if (READ_ONLY_BUNDLE_IDS.has(bundleId)) return 'read';
   if (SHELL_ACCESS_BUNDLE_IDS.has(bundleId)) return 'click';
   return 'full';
@@ -143,9 +151,9 @@ export class PolicyError extends Error {
 /**
  * The frontmost-app gate. Called before every input action.
  *
- * `actionKind` decides which tier restriction applies: a 'read'-tier app can
- * be clicked but not typed into; a 'click'-tier app can be clicked and typed
- * into only if it is not shell-capable... see tierForApp for the mapping.
+ * `actionKind` decides which tier restriction applies (strict mode only, see
+ * tierForApp): a 'read'-tier app refuses every interaction; a 'click'-tier
+ * app allows clicking and scrolling but refuses typing and keys.
  */
 export function assertActionAllowed(
   session: SessionState,

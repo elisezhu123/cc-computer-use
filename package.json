@@ -1,12 +1,14 @@
 {
   "name": "computer-use-mcp-server",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "macOS computer-use MCP server that mirrors the Claude Code computer-use tool contract, driven by cliclick",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
     "computer-use-mcp": "dist/index.js",
-    "computer-use-mcp-gateway": "dist/http-server.js"
+    "computer-use-mcp-gateway": "dist/http-server.js",
+    "computer-use-mcp-browser": "dist/browser.js",
+    "computer-use-mcp-background": "dist/background.js"
   },
   "scripts": {
     "build": "tsc && npm run copy-native",
@@ -17,7 +19,11 @@
     "typecheck": "tsc --noEmit",
     "copy-native": "mkdir -p dist/native && cp src/native/*.swift dist/native/",
     "start:gateway": "node dist/http-server.js",
-    "dev:gateway": "tsx src/http-server.ts"
+    "dev:gateway": "tsx src/http-server.ts",
+    "start:browser": "node dist/browser.js",
+    "dev:browser": "tsx src/browser.ts",
+    "start:background": "node dist/background.js",
+    "dev:background": "tsx src/background.ts"
   },
   "engines": {
     "node": ">=18"
@@ -25,6 +31,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "express": "^5.2.1",
+    "playwright-core": "^1.63.0",
     "sharp": "^0.33.0",
     "zod": "^3.23.8"
   },
@@ -41,7 +48,8 @@
     "claude",
     "anthropic",
     "macos",
-    "cliclick"
+    "cliclick",
+    "playwright"
   ],
   "license": "MIT"
 }

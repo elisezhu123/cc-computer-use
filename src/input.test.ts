@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { parseChord, toCliclickKey, chordModifiers } from './input.js';
+import { parseChord, toCliclickKey, chordModifiers, moveAndClickArgs } from './input.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -130,4 +130,28 @@ test('letters are never emitted through kp: (also rejected)', { skip: NO_CLICLIC
     const bad = await cliclickRejects([`kp:${ch}`]);
     assert.ok(bad !== null, `cliclick unexpectedly accepted kp:${ch}`);
   }
+});
+
+test('moveAndClickArgs moves, settles, and clicks in one argv', () => {
+  assert.deepEqual(moveAndClickArgs(100.4, 200.6, 'left', 1), ['m:100,201', 'w:50', 'c:.']);
+  assert.deepEqual(moveAndClickArgs(1, 2, 'left', 2), ['m:1,2', 'w:50', 'dc:.']);
+  assert.deepEqual(moveAndClickArgs(1, 2, 'right', 2), ['m:1,2', 'w:50', 'rc:.', 'rc:.']);
+  assert.deepEqual(
+    moveAndClickArgs(1, 2, 'left', 1, ['command', 'shift']),
+    ['m:1,2', 'w:50', 'kd:cmd,shift', 'c:.', 'ku:shift,cmd'],
+  );
+});
+
+test('cliclick accepts every moveAndClick argv', { skip: NO_CLICLICK }, async () => {
+  const rejects: string[] = [];
+  for (const argv of [
+    moveAndClickArgs(10, 20, 'left', 1),
+    moveAndClickArgs(10, 20, 'left', 3),
+    moveAndClickArgs(10, 20, 'right', 1),
+    moveAndClickArgs(10, 20, 'left', 1, ['cmd', 'alt']),
+  ]) {
+    const bad = await cliclickRejects(argv);
+    if (bad) rejects.push(`${argv.join(' ')}: ${bad}`);
+  }
+  assert.deepEqual(rejects, [], `cliclick rejected:\n${rejects.join('\n')}`);
 });

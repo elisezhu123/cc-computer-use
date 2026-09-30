@@ -7,7 +7,7 @@ const KINDS = ['read', 'click', 'type', 'key', 'scroll'] as const;
 function session(apps: string[], grants: Partial<{ clipboardRead: boolean; clipboardWrite: boolean; systemKeyCombos: boolean }> = {}): SessionState {
   const s = newSession();
   s.allowedBundleIds = new Set(apps);
-  for (const a of apps) s.tiers.set(a, tierForApp(a));
+  for (const a of apps) s.tiers.set(a, tierForApp(a, true));
   Object.assign(s.grants, grants);
   return s;
 }
@@ -18,7 +18,7 @@ function allows(s: SessionState, bundleId: string | null, kind: (typeof KINDS)[n
   catch (e) { if (e instanceof PolicyError) return false; throw e; }
 }
 
-test('full truth table: allowlist x tier x action', () => {
+test('full truth table (strict tiers): allowlist x tier x action', () => {
   const cases: [string, string, string, boolean][] = [
     // [label, app, action, expected]
     ['no allowlist at all', '', 'click', false],
@@ -110,7 +110,7 @@ test('systemKeyCombos gates the blocklist and nothing else', () => {
 test('allowlist accumulates rather than replacing', () => {
   const s = session(['com.apple.TextEdit']);
   s.allowedBundleIds!.add('com.apple.Notes');
-  s.tiers.set('com.apple.Notes', tierForApp('com.apple.Notes'));
+  s.tiers.set('com.apple.Notes', tierForApp('com.apple.Notes', true));
   assert.equal(allows(s, 'com.apple.TextEdit', 'click'), true, 'the earlier grant survives');
   assert.equal(allows(s, 'com.apple.Notes', 'click'), true, 'the new grant applies');
 });

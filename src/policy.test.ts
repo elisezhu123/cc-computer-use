@@ -53,13 +53,26 @@ test('normalizeKeySequence canonicalizes, dedupes, and orders', () => {
 
 // ── Tiers ────────────────────────────────────────────────────────────────────
 
-test('tierForApp classifies shells, browsers, and everything else', () => {
-  assert.equal(tierForApp('com.apple.Terminal'), 'click');
-  assert.equal(tierForApp('com.googlecode.iterm2'), 'click');
-  assert.equal(tierForApp('com.apple.Safari'), 'read');
-  assert.equal(tierForApp('com.google.Chrome'), 'read');
-  assert.equal(tierForApp('com.apple.TextEdit'), 'full');
-  assert.equal(tierForApp(null), 'full');
+test('by default every app is fully interactive, browsers and shells included', () => {
+  for (const id of ['com.google.Chrome', 'com.apple.Safari', 'com.apple.Terminal', 'com.apple.TextEdit']) {
+    assert.equal(tierForApp(id, false), 'full', id);
+  }
+  const s = newSession();
+  s.allowedBundleIds = new Set(['com.google.Chrome', 'com.apple.Terminal']);
+  for (const id of s.allowedBundleIds) s.tiers.set(id, tierForApp(id, false));
+  for (const kind of ['click', 'type', 'key', 'scroll'] as const) {
+    assert.doesNotThrow(() => assertActionAllowed(s, 'com.google.Chrome', kind), `Chrome/${kind}`);
+    assert.doesNotThrow(() => assertActionAllowed(s, 'com.apple.Terminal', kind), `Terminal/${kind}`);
+  }
+});
+
+test('strict mode classifies shells, browsers, and everything else', () => {
+  assert.equal(tierForApp('com.apple.Terminal', true), 'click');
+  assert.equal(tierForApp('com.googlecode.iterm2', true), 'click');
+  assert.equal(tierForApp('com.apple.Safari', true), 'read');
+  assert.equal(tierForApp('com.google.Chrome', true), 'read');
+  assert.equal(tierForApp('com.apple.TextEdit', true), 'full');
+  assert.equal(tierForApp(null, true), 'full');
 });
 
 // ── Gate ─────────────────────────────────────────────────────────────────────
@@ -67,7 +80,7 @@ test('tierForApp classifies shells, browsers, and everything else', () => {
 function sessionWith(apps: string[], grants: Partial<{ clipboardRead: boolean; clipboardWrite: boolean; systemKeyCombos: boolean }> = {}) {
   const s = newSession();
   s.allowedBundleIds = new Set(apps);
-  for (const a of apps) s.tiers.set(a, tierForApp(a));
+  for (const a of apps) s.tiers.set(a, tierForApp(a, true));
   Object.assign(s.grants, grants);
   return s;
 }
@@ -94,7 +107,7 @@ test('an app inside the allowlist at full tier is allowed', () => {
   assert.doesNotThrow(() => assertActionAllowed(s, 'com.apple.TextEdit', 'type'));
 });
 
-test('a read-tier app can be seen but never touched', () => {
+test('strict: a read-tier app can be seen but never touched', () => {
   const s = sessionWith(['com.apple.Safari']);
   assert.throws(
     () => assertActionAllowed(s, 'com.apple.Safari', 'click'),
@@ -102,7 +115,7 @@ test('a read-tier app can be seen but never touched', () => {
   );
 });
 
-test('a click-tier app refuses typing but allows clicking', () => {
+test('strict: a click-tier app refuses typing but allows clicking', () => {
   const s = sessionWith(['com.apple.Terminal']);
   assert.doesNotThrow(() => assertActionAllowed(s, 'com.apple.Terminal', 'click'));
   assert.throws(
