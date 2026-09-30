@@ -5,7 +5,8 @@
  * (Spotlight) gives the full installed set across /Applications and
  * ~/Applications, which is what request_access needs to resolve display names.
  * But Spotlight is often slow or disabled, so the frontmost check - which runs
- * before EVERY input action - uses System Events instead, which is immediate.
+ * before EVERY input action - asks LaunchServices directly via lsappinfo,
+ * falling back to System Events.
  */
 
 import { execFile } from 'node:child_process';
@@ -48,39 +49,109 @@ const ENUMERATION_ROOTS = [
  * Enumerate installed applications. Timed by the caller (the tool description
  * is a nice-to-have, not a startup dependency).
  */
-export async function listInstalledApps(): Promise<InstalledApp[]> {
-  const roots = ENUMERATION_ROOTS;
-  const seen = new Set<string>();
-  const out: InstalledApp[] = [];
-
-  for (const root of roots) {
-    let paths: string[] = [];
-    try {
-      const { stdout } = await execFileAsync('mdfind', [
-        '-onlyin', root,
-        'kMDItemContentType == "com.apple.application-bundle"',
-      ]);
-      paths = stdout.split('\n').map((s) => s.trim()).filter(Boolean);
-    } catch {
-      continue;
+/** Map with at most `limit` calls in flight, preserving order. */
+async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]!);
     }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
 
-    for (const appPath of paths) {
-      if (seen.has(appPath)) continue;
-      seen.add(appPath);
-      const bundleId = await readBundleId(appPath);
-      if (!bundleId) continue;
-      const base = appPath.split('/').pop() ?? appPath;
-      out.push({ bundleId, displayName: base.replace(/\.app$/, ''), path: appPath });
+/**
+ * Parse `mdfind -attr kMDItemCFBundleIdentifier` output. Each line is
+ * "<path>   kMDItemCFBundleIdentifier = <id>", with "(null)" when Spotlight
+ * has no bundle ID for the item.
+ */
+export function parseMdfindBundleIds(stdout: string): { path: string; bundleId: string | null }[] {
+  const out: { path: string; bundleId: string | null }[] = [];
+  for (const line of stdout.split('\n')) {
+    const m = /^(.*?\.app)\s+kMDItemCFBundleIdentifier\s*=\s*(.*)$/.exec(line.trim());
+    if (m) {
+      const id = m[2]!.trim().replace(/^"(.*)"$/, '$1');
+      out.push({ path: m[1]!, bundleId: id && id !== '(null)' ? id : null });
+    } else if (line.trim().endsWith('.app')) {
+      out.push({ path: line.trim(), bundleId: null });
     }
   }
+  return out;
+}
 
+/**
+ * Enumerate installed applications. Timed by the caller (the tool description
+ * is a nice-to-have, not a startup dependency).
+ *
+ * One mdfind per root returns paths and bundle IDs together; `defaults read`
+ * is only spawned for the few bundles Spotlight has no ID for, and those run
+ * concurrently. Reading every bundle with `defaults` serially cost one process
+ * per installed app at startup.
+ */
+export async function listInstalledApps(): Promise<InstalledApp[]> {
+  const found = await Promise.all(
+    ENUMERATION_ROOTS.map(async (root) => {
+      try {
+        const { stdout } = await execFileAsync('mdfind', [
+          '-onlyin', root,
+          '-attr', 'kMDItemCFBundleIdentifier',
+          'kMDItemContentType == "com.apple.application-bundle"',
+        ], { maxBuffer: 16 * 1024 * 1024 });
+        return parseMdfindBundleIds(stdout);
+      } catch {
+        return [];
+      }
+    }),
+  );
+
+  const seen = new Set<string>();
+  const entries = found.flat().filter((e) => !seen.has(e.path) && seen.add(e.path));
+  const resolved = await mapLimit(entries, 16, async (e) => ({
+    ...e,
+    bundleId: e.bundleId ?? (await readBundleId(e.path)),
+  }));
+
+  const out: InstalledApp[] = [];
+  for (const { path, bundleId } of resolved) {
+    if (!bundleId) continue;
+    const base = path.split('/').pop() ?? path;
+    out.push({ bundleId, displayName: base.replace(/\.app$/, ''), path });
+  }
   out.sort((a, b) => a.displayName.localeCompare(b.displayName));
   return out;
 }
 
+/** Parse `lsappinfo info -only bundleid` output: "CFBundleIdentifier"="com.x". */
+export function parseLsappinfoBundleId(stdout: string): string | null {
+  const m = /"CFBundleIdentifier"\s*=\s*"([^"]+)"/.exec(stdout);
+  return m ? m[1]! : null;
+}
+
+/**
+ * Frontmost app via LaunchServices. lsappinfo is a plain local query, so two
+ * short spawns cost a fraction of an osascript Apple-event round trip to
+ * System Events - which matters because this runs before every action - and
+ * it needs no Automation permission.
+ */
+async function frontmostViaLsappinfo(): Promise<string | null> {
+  try {
+    const { stdout: asn } = await execFileAsync('lsappinfo', ['front']);
+    const front = asn.trim();
+    if (!/^ASN:/.test(front)) return null;
+    const { stdout } = await execFileAsync('lsappinfo', ['info', '-only', 'bundleid', front]);
+    return parseLsappinfoBundleId(stdout);
+  } catch {
+    return null;
+  }
+}
+
 /** Bundle ID of the frontmost application, or null if undeterminable. */
 export async function getFrontmostBundleId(): Promise<string | null> {
+  const fast = await frontmostViaLsappinfo();
+  if (fast) return fast;
   try {
     const { stdout } = await execFileAsync('osascript', [
       '-e',

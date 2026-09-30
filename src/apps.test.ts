@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { filterAppsForDescription, resolveApp } from './apps.js';
+import { filterAppsForDescription, resolveApp, parseLsappinfoBundleId, parseMdfindBundleIds } from './apps.js';
 import type { InstalledApp } from './types.js';
 
 const app = (displayName: string, bundleId: string, path = `/Applications/${displayName}.app`): InstalledApp =>
@@ -99,4 +99,29 @@ test('a bundle-ID-shaped miss falls through to Spotlight, not a wildcard', async
   assert.equal(await resolveApp('com.example.notinstalled.xyzzy', FIXTURE), null);
   // A display-name-shaped request must never reach Spotlight as a query.
   assert.equal(await resolveApp('Some App That Is Not Installed', FIXTURE), null);
+});
+
+// ── Fast-path parsers ────────────────────────────────────────────────────────
+
+test('parseLsappinfoBundleId reads the bundle ID and rejects anything else', () => {
+  assert.equal(parseLsappinfoBundleId('"CFBundleIdentifier"="com.google.Chrome"\n'), 'com.google.Chrome');
+  assert.equal(parseLsappinfoBundleId('"CFBundleIdentifier" = "com.apple.Terminal"'), 'com.apple.Terminal');
+  assert.equal(parseLsappinfoBundleId(''), null);
+  assert.equal(parseLsappinfoBundleId('"CFBundleIdentifier"=[ NULL ]'), null);
+});
+
+test('parseMdfindBundleIds pairs paths with IDs, including paths with spaces', () => {
+  const out = parseMdfindBundleIds([
+    '/Applications/Safari.app   kMDItemCFBundleIdentifier = "com.apple.Safari"',
+    '/Applications/Visual Studio Code.app   kMDItemCFBundleIdentifier = com.microsoft.VSCode',
+    '/Applications/Odd.app   kMDItemCFBundleIdentifier = (null)',
+    '/Applications/Plain.app',
+    '',
+  ].join('\n'));
+  assert.deepEqual(out, [
+    { path: '/Applications/Safari.app', bundleId: 'com.apple.Safari' },
+    { path: '/Applications/Visual Studio Code.app', bundleId: 'com.microsoft.VSCode' },
+    { path: '/Applications/Odd.app', bundleId: null },
+    { path: '/Applications/Plain.app', bundleId: null },
+  ]);
 });
