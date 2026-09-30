@@ -7,7 +7,8 @@
   "bin": {
     "computer-use-mcp": "dist/index.js",
     "computer-use-mcp-gateway": "dist/http-server.js",
-    "computer-use-mcp-browser": "dist/browser.js"
+    "computer-use-mcp-browser": "dist/browser.js",
+    "computer-use-mcp-background": "dist/background.js"
   },
   "scripts": {
     "build": "tsc && npm run copy-native",
@@ -20,7 +21,9 @@
     "start:gateway": "node dist/http-server.js",
     "dev:gateway": "tsx src/http-server.ts",
     "start:browser": "node dist/browser.js",
-    "dev:browser": "tsx src/browser.ts"
+    "dev:browser": "tsx src/browser.ts",
+    "start:background": "node dist/background.js",
+    "dev:background": "tsx src/background.ts"
   },
   "engines": {
     "node": ">=18"
