@@ -22,7 +22,7 @@ const coordinateTuple = {
   description: `(x, y): ${COORD_DESC.x} ${COORD_DESC.y}`,
 };
 
-const FRONTMOST_GATE_DESC =
+export const FRONTMOST_GATE_DESC =
   'The frontmost application must be in the session allowlist at the time of this call, or this tool returns an error and does nothing.';
 
 const clickModifierText = {

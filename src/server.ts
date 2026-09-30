@@ -679,7 +679,7 @@ export async function createServer(
   // registering handlers directly on it leaves the capability unset, and the
   // SDK then rejects tools/list with "Server does not support tools".
   const server = new Server(
-    { name: 'computer-use', version: '3.0.0' },
+    { name: 'computer-use', version: '3.1.0' },
     { capabilities: { tools: {}, logging: {} } },
   );
 
