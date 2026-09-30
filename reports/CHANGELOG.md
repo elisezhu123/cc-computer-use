@@ -2,6 +2,12 @@
 
 ## 未发布
 
+### 性能
+- 前台应用检查改用 `lsappinfo`，不再每个动作都向 System Events 发 Apple Event；同时不再需要 System Events 的自动化授权（`osascript` 仅作回退）。
+- 点击的移动、稳定等待、点击合并为一次 cliclick 调用。
+- 已授予 `clipboardWrite` 时，超过 200 字符的单行文本改为粘贴。
+- 启动时的应用枚举改用 `mdfind -attr` 一次取回 bundle ID，不再对每个应用串行执行 `defaults read`。
+
 ### 修复
 - **补齐缺失的源文件。** 网页上传受 GitHub 单次 100 个文件的限制，`src/index.ts`、`server.ts`、`tools.ts`、
   `coords.ts`、`screen.ts`、`policy.truth.test.ts` 当时没有传上来，已补齐；`dist/` 不再纳入版本控制。

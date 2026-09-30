@@ -91,8 +91,6 @@ claude mcp add computer-use -- node /path/to/cc-computer-use/dist/index.js
 
 如果缺少权限，服务器启动时会直接报出缺了哪一项、以及怎么修复。
 
-首次执行操作时，macOS 还会询问是否允许该应用控制 **System Events**（用于判断前台应用），请点击允许。
-
 ## 使用
 
 直接用自然语言描述任务即可，例如：
@@ -186,7 +184,7 @@ node test-tools.mjs    # 真机冒烟：启动服务器并列出工具（需要 
 | 启动失败：`Screen Recording permission is not granted` | 给启动服务器的应用开启“屏幕录制”，然后重启该应用 |
 | 启动失败：`Accessibility permission is not granted` | 开启“辅助功能”，然后重启 |
 | 启动失败：`cliclick is not installed or not runnable` | `brew install cliclick` |
-| 所有操作都返回 `not_granted`，提示无法确定前台应用 | 在“隐私与安全性 → 自动化”中允许启动服务器的应用控制 **System Events** |
+| 所有操作都返回 `not_granted`，提示无法确定前台应用 | 前台应用通过 `lsappinfo` 查询，失败时回退到 AppleScript；这时需要在“隐私与安全性 → 自动化”中允许启动服务器的应用控制 **System Events** |
 | 工具返回 `needs_access` | 需要先调用 `request_access` |
 | 工具返回 `not_granted` | 前台应用不在白名单里：先用 `request_access` 添加它，或把已授权的应用切到前台 |
 | 工具返回 `denied_tier` | 该应用属于 click / read 分级，不允许这个操作 |
@@ -199,7 +197,7 @@ node test-tools.mjs    # 真机冒烟：启动服务器并列出工具（需要 
 
 - 仅支持 macOS。
 - 输入通过 cliclick 模拟，某些对合成事件做了限制的应用（例如部分游戏、安全输入框）可能不响应。
-- 前台应用检查和 `open_application` 都通过 AppleScript 实现。首次使用时，macOS 会询问是否允许控制 System Events 或目标应用，需要点击允许。
+- `open_application` 通过 AppleScript 激活应用，首次使用时 macOS 可能会询问是否允许控制目标应用，需要点击允许。
 
 ## 许可
 

@@ -98,8 +98,7 @@ macOS 的权限是授予**启动 MCP 服务器的那个应用**的，而不是 n
 
 1. **屏幕录制**：打开上表中对应的应用。
 2. **辅助功能**：打开上表中对应的应用。
-3. **自动化**：首次操作时会弹窗询问是否允许控制 **System Events**（用于判断前台应用），点击允许。
-   之后 `open_application` 激活其他应用时，可能还会针对目标应用再询问一次。
+3. **自动化**：`open_application` 首次激活某个应用时，macOS 可能会询问是否允许控制该应用，点击允许。
 
 授予屏幕录制和辅助功能权限后，需要**完全退出并重新打开**该应用才会生效。
 
@@ -153,7 +152,7 @@ Claude Desktop 的 MCP 日志位于 `~/Library/Logs/Claude/mcp-server-computer-u
 | 错误码 | 含义 | 处理 |
 |--------|------|------|
 | `needs_access` | 本会话还没有调用 `request_access` | 先调用 `request_access` |
-| `not_granted` | 前台应用不在白名单中，或无法确定前台应用 | 用 `request_access` 添加该应用，或把已授权的应用切到前台；如果一直无法确定前台应用，检查“自动化”中 System Events 的授权 |
+| `not_granted` | 前台应用不在白名单中，或无法确定前台应用 | 用 `request_access` 添加该应用，或把已授权的应用切到前台；如果一直无法确定前台应用（`lsappinfo` 不可用时会回退到 AppleScript），检查“自动化”中 System Events 的授权 |
 | `denied_tier` | 该应用属于 click（终端 / IDE）或 read（浏览器）分级 | 这是有意的限制，见 [README 的权限模型](README.md#权限模型) |
 | `needs_flag` | 需要额外授权 | 重新调用 `request_access`，带上 `clipboardRead` / `clipboardWrite` / `systemKeyCombos` |
 

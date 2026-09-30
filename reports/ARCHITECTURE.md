@@ -19,7 +19,7 @@ computer-use MCP 服务器（`@ant/computer-use-mcp`）。
 | 滚动、中键点击 | 原生模块 | 首次使用时编译的 Swift CGEvent helper（`scroll.ts` + `native/scroll.swift`） |
 | 截图 | 原生截屏 | `screencapture` + `sharp` 缩放（`screen.ts`） |
 | 剪贴板 | 原生 | `pbcopy` / `pbpaste`（`clipboard.ts`） |
-| 应用枚举 / 激活 | 原生 | `mdfind`、`defaults`、`osascript`（`apps.ts`） |
+| 应用枚举 / 前台应用 / 激活 | 原生 | `mdfind -attr`、`lsappinfo`、`osascript`（`apps.ts`） |
 | 显示器几何 | 原生 | `system_profiler` + 实测截图尺寸（`display.ts`） |
 | 权限策略 | 白名单、分级、快捷键黑名单 | 同样的概念，独立实现（`policy.ts`） |
 
@@ -52,7 +52,7 @@ src/
 MCP 客户端
   └─ tools/call ─► dispatch(ctx, name, args)            server.ts
                       ├─ guard(ctx, kind)               每个输入动作恰好一次
-                      │    ├─ getFrontmostBundleId()    apps.ts（System Events）
+                      │    ├─ getFrontmostBundleId()    apps.ts（lsappinfo，回退 osascript）
                       │    └─ assertActionAllowed()     policy.ts
                       ├─ assertChordAllowed()           key / hold_key
                       ├─ toLogical(x, y)                coords.ts
@@ -158,10 +158,12 @@ cliclick 有三种按键机制，用错了会静默出错：
 - 单行文本：`cliclick t:`。参数通过 argv 传递，从不经过 shell，文本中的任何字符都不会造成命令注入。
 - 多行文本：`t:` 不会把 `\n` 转成回车，所以改为剪贴板粘贴，需要 `clipboardWrite` 授权。
   流程为：保存剪贴板 → 写入 → **回读校验** → ⌘V → 等待 100ms → 在 `finally` 中恢复原剪贴板。
+- 长文本：已授予 `clipboardWrite` 时，超过 200 字符的单行文本也走同样的粘贴流程，比逐字符输入快得多。
 
 ### 鼠标
 
 - 移动后等待 50ms（`MOVE_SETTLE_MS`）再点击，确保应用已经处理完移动事件。
+  移动、等待、点击合并在**一次** cliclick 调用里完成（`m:` + `w:50` + `c:`），省掉一次进程启动。
 - 拖拽使用 `dd:` + `dm:` + `du:`，中间的移动事件是大多数拖拽目标识别手势所必需的。
 
 ### 滚动与中键（`scroll.ts`）
@@ -179,6 +181,15 @@ helper 会回复 `ok` / `err`，静默失败会被报告为工具错误。
 - 常用应用和系统应用（Finder、TextEdit…）按 bundle ID 强制保留，不受 80 个的数量上限影响。
 - **应用名可以被任何人随意设置**，因此会先截断到 40 个字符，再按字符白名单过滤，
   防止有人借应用名往工具描述里注入指令。
+
+## 性能
+
+前台应用检查在**每个动作前**都会执行（批处理中每一步各一次），是单次操作延迟的主要来源，因此：
+
+- 前台应用用 `lsappinfo front` + `lsappinfo info -only bundleid` 直接查询 LaunchServices，比 `osascript` 向 System Events 发 Apple Event 快得多，也不需要“自动化”权限；只有 `lsappinfo` 失败时才回退到 `osascript`。
+- 点击的移动、稳定等待、点击在一次 cliclick 调用中完成。
+- 启动时用 `mdfind -attr kMDItemCFBundleIdentifier` 一次取回路径和 bundle ID，只对 Spotlight 缺 ID 的应用回退到 `defaults read`（最多 16 个并发）。
+- 批量操作请用 `computer_batch`：省掉的是模型往返，这比任何本地优化都显著。
 
 ## 启动预检（`display.ts`）
 
