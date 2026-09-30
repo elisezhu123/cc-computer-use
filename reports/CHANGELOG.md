@@ -8,6 +8,10 @@
 - 已授予 `clipboardWrite` 时，超过 200 字符的单行文本改为粘贴。
 - 启动时的应用枚举改用 `mdfind -attr` 一次取回 bundle ID，不再对每个应用串行执行 `defaults read`。
 
+### 变更
+- **所有已授权的应用默认都可以完全交互。** 此前浏览器（Safari、Chrome、Firefox、Edge、Arc）被写死为只读，任何点击都返回 `denied_tier`；终端和 IDE 只能点击，不能输入；而且没有任何开关可以改。代码注释还写着“只读级可以点击”，与实际行为不符。
+  现在默认全部放开，白名单、前台应用检查和系统快捷键黑名单保持不变；设置 `CU_STRICT_APP_TIERS=1` 可恢复原来的分级。
+
 ### 修复
 - **补齐缺失的源文件。** 网页上传受 GitHub 单次 100 个文件的限制，`src/index.ts`、`server.ts`、`tools.ts`、
   `coords.ts`、`screen.ts`、`policy.truth.test.ts` 当时没有传上来，已补齐；`dist/` 不再纳入版本控制。

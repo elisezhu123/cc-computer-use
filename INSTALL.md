@@ -153,7 +153,7 @@ Claude Desktop 的 MCP 日志位于 `~/Library/Logs/Claude/mcp-server-computer-u
 |--------|------|------|
 | `needs_access` | 本会话还没有调用 `request_access` | 先调用 `request_access` |
 | `not_granted` | 前台应用不在白名单中，或无法确定前台应用 | 用 `request_access` 添加该应用，或把已授权的应用切到前台；如果一直无法确定前台应用（`lsappinfo` 不可用时会回退到 AppleScript），检查“自动化”中 System Events 的授权 |
-| `denied_tier` | 该应用属于 click（终端 / IDE）或 read（浏览器）分级 | 这是有意的限制，见 [README 的权限模型](README.md#权限模型) |
+| `denied_tier` | 只在设置了 `CU_STRICT_APP_TIERS=1` 时出现：该应用属于 click（终端 / IDE）或 read（浏览器）分级 | 去掉该环境变量即可放开，见 [README 的权限模型](README.md#权限模型) |
 | `needs_flag` | 需要额外授权 | 重新调用 `request_access`，带上 `clipboardRead` / `clipboardWrite` / `systemKeyCombos` |
 
 ### 点击位置不准

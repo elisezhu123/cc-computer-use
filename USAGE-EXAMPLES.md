@@ -183,7 +183,7 @@
 |------|------|------|
 | 未调用 `request_access` 就截图 | `needs_access` | 必须先申请 |
 | Finder 在前台时点击，但只授权了 TextEdit | `not_granted` | 前台应用不在白名单中 |
-| 在 Terminal 中 `type` | `denied_tier` | 终端只允许点击 |
-| 在 Safari 中点击 | `denied_tier` | 浏览器只允许查看 |
+| 在 Terminal 中 `type`（仅 `CU_STRICT_APP_TIERS=1` 时） | `denied_tier` | 严格模式下终端只允许点击 |
+| 在 Safari 中点击（仅 `CU_STRICT_APP_TIERS=1` 时） | `denied_tier` | 严格模式下浏览器只允许查看 |
 | `key` `cmd+q`（未授予 `systemKeyCombos`） | `needs_flag` | 系统级快捷键 |
 | 多行 `type`（未授予 `clipboardWrite`） | `needs_flag` | 多行输入需要剪贴板 |

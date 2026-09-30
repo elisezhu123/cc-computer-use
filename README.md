@@ -29,7 +29,7 @@ Claude Code Desktop 内置了 computer use：先申请要控制的应用，再�
 - **与官方一致的 24 个工具**：`request_access`、`screenshot`、`zoom`、`left_click`、`type`、`key`、`scroll`、`computer_batch` 等。
 - **权限保护**：
   - 会话级应用白名单，每个动作执行前都检查前台应用；
-  - 终端、IDE 只允许点击，浏览器只允许查看；
+  - 已授权的应用（包括浏览器、终端、IDE）都可以查看、点击和输入；
   - 剪贴板和系统快捷键（⌘Q、⌘Tab 等）需要单独授权。
 - **点击精准**：截图在本地按 API 算法预先缩放，坐标按实测的显示器几何映射，Retina 屏和多显示器都能正确定位。
 - **批处理**：`computer_batch` 一次调用执行多步操作，减少模型往返次数。
@@ -133,15 +133,18 @@ claude mcp add computer-use -- node /path/to/cc-computer-use/dist/index.js
 
 ## 权限模型
 
-| 应用分级 | 应用 | 允许的操作 |
-|----------|------|------------|
-| full | 大多数应用 | 全部 |
-| click | Terminal、iTerm2、VS Code、Warp、WezTerm、Alacritty、kitty、IntelliJ、PyCharm | 点击、滚动；不能输入和按键 |
-| read | Safari、Chrome、Firefox、Edge、Arc | 只能在截图中查看 |
-
+- 只能操作 `request_access` 授权过的应用。授权后的应用（包括浏览器、终端、IDE）都可以查看、点击、输入和按键。
 - 每个输入动作执行前都会检查前台应用是否在白名单中，`computer_batch` 中的每一步也会单独检查。
 - ⌘Q、⇧⌘Q、⌥⌘Esc、⌘Tab、⌘Space、⌃⌘Q 需要 `systemKeyCombos` 授权。任何别名写法（`command+q`、`meta+q`）
   和夹带写法（`cmd+q+a`）都会被识别出来。
+- **可选的严格分级**：设置环境变量 `CU_STRICT_APP_TIERS=1` 后，恢复官方的限制：
+  浏览器（Safari、Chrome、Firefox、Edge、Arc）只能查看；终端和 IDE（Terminal、iTerm2、VS Code、Warp、WezTerm、
+  Alacritty、kitty、IntelliJ、PyCharm）只能点击和滚动，不能输入。适合不希望模型在网页上提交表单、付款，
+  或在终端里执行命令的场景。
+
+  ```bash
+  claude mcp add computer-use -e CU_STRICT_APP_TIERS=1 -- node /path/to/cc-computer-use/dist/index.js
+  ```
 
 设计细节见 [reports/ARCHITECTURE.md](reports/ARCHITECTURE.md)。
 
@@ -187,7 +190,7 @@ node test-tools.mjs    # 真机冒烟：启动服务器并列出工具（需要 
 | 所有操作都返回 `not_granted`，提示无法确定前台应用 | 前台应用通过 `lsappinfo` 查询，失败时回退到 AppleScript；这时需要在“隐私与安全性 → 自动化”中允许启动服务器的应用控制 **System Events** |
 | 工具返回 `needs_access` | 需要先调用 `request_access` |
 | 工具返回 `not_granted` | 前台应用不在白名单里：先用 `request_access` 添加它，或把已授权的应用切到前台 |
-| 工具返回 `denied_tier` | 该应用属于 click / read 分级，不允许这个操作 |
+| 工具返回 `denied_tier` | 只在开启了 `CU_STRICT_APP_TIERS=1` 时出现：该应用属于只读（浏览器）或只能点击（终端 / IDE）分级 |
 | 滚动时报 Swift 编译失败 | `xcode-select --install` |
 | 点击位置有偏差 | 先重新截图（坐标以最近一次截图为准）；多显示器时确认 `switch_display` 选对了屏幕 |
 

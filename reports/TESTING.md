@@ -25,8 +25,8 @@ npm run typecheck # 只做类型检查
 | `coords.test.ts` | 13 | `targetImageSize` 的长边和 token 双约束（包括 14" MBP 的 1568×1014 陷阱、竖屏）、模型像素 ↔ 逻辑点互逆映射、未截图时坐标直通、`clampRegion` |
 | `coords.fullspace.test.ts` | 18 | 内置 Retina、外接 4K HiDPI、非 Retina、截图大于显示器四种显示器，各测 4 项：四个角精确映射、全屏往返误差 ≤ 1pt、单调且不越界、`1/scaleFactor` 公式会明显出错；另有 `clampRegion` 退化/反向矩形和越界坐标行为 |
 | `input.test.ts` | 7 | 键名映射、组合键拆分；**用真实 cliclick 的 `-m test` 模式**校验我们生成的每个参数都能被接受，并确认 `kp:cmd`、`kp:a` 会被拒绝 |
-| `policy.test.ts` | 15 | 快捷键黑名单（各种别名写法、`cmd+q+a` 后缀绕过）、应用分级、授权标志 |
-| `policy.truth.test.ts` | 6 | 白名单 × 分级 × 动作类型的完整真值表；每种拒绝都返回可区分的错误码；白名单累加而不是覆盖 |
+| `policy.test.ts` | 16 | 快捷键黑名单（各种别名写法、`cmd+q+a` 后缀绕过）、默认所有应用可完全交互、严格模式下的应用分级、授权标志 |
+| `policy.truth.test.ts` | 6 | 白名单 × 分级（严格模式）× 动作类型的完整真值表；每种拒绝都返回可区分的错误码；白名单累加而不是覆盖 |
 | `apps.test.ts` | 9 | 描述中的应用列表过滤：去掉后台组件和守护进程、强制保留 Finder/TextEdit、保留非 ASCII 名称、应用名字符白名单（防提示注入）；`resolveApp` 按名称/bundle ID 精确匹配，不做模糊猜测 |
 
 ## 真机冒烟测试（macOS）
@@ -42,7 +42,8 @@ npm run typecheck # 只做类型检查
 5. **文本**：`type` 输入单行中英文；授予 `clipboardWrite` 后输入多行文本，确认换行正确、原剪贴板内容已恢复。
 6. **组合键**：`key` `cmd+a`、`cmd+shift+left`；`cmd+q` 在未授予 `systemKeyCombos` 时应被拒绝。
 7. **前台检查**：把未授权的应用切到前台后执行 `left_click`，应返回 `not_granted`。
-8. **分级**：授权 Terminal 后，`left_click` 允许，`type` 返回 `denied_tier`。
+8. **浏览器交互**：授权 Chrome 后，`left_click`、`type`、`key` 都能正常执行。
+   （设置 `CU_STRICT_APP_TIERS=1` 重启后，Chrome 点击应返回 `denied_tier`，Terminal 允许点击但 `type` 返回 `denied_tier`。）
 9. **滚动 / 中键**：首次 `scroll` 会编译 Swift helper（需要 Xcode Command Line Tools），之后滚动应立即响应。
 10. **批处理**：`computer_batch` 执行“点击 → 输入 → 回车”，中途失败时返回已完成的步骤。
 11. **多显示器**（如有）：`switch_display` 切到副屏后截图并点击。
