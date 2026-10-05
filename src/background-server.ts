@@ -318,7 +318,7 @@ export class BackgroundSession extends DriverSession {
             lastScreenshot: this.lastScreenshot?.dims ?? null,
           }, null, 2));
         case 'open_application':
-          return text(await this.openApplication(String(args.app ?? '')));
+          return await this.withScreenshot(name, args, text(await this.openApplication(String(args.app ?? ''))));
         case 'screenshot':
         case 'zoom':
           if (this.policy.allowedBundleIds === null) {
