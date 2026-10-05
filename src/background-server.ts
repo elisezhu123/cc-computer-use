@@ -4,7 +4,9 @@
  * moving the user's cursor or needing the app in front.
  *
  * Input goes straight to the target process (CGEventPostToPid via
- * native/background.swift); screenshots capture just that app's window
+ * native/background.swift; buttons and other controls are pressed through
+ * Accessibility), and an agent cursor overlay shows where the agent acts
+ * while the user's own cursor stays put. Screenshots capture just that app's window
  * (`screencapture -l`), even while other windows cover it. Coordinates are
  * pixels of that window screenshot.
  *
@@ -115,11 +117,10 @@ export class NativeDriver implements Driver {
     this.gate('click');
     const flags = chord ? parseNativeChord(chord).flags : 0;
     const { gx, gy } = await this.global(x, y);
-    await this.mouse('move', button, gx, gy);
-    for (let i = 1; i <= count; i++) {
-      await this.mouse('down', button, gx, gy, i, flags);
-      await this.mouse('up', button, gx, gy, i, flags);
-    }
+    // One request: the helper glides the agent cursor there, then presses the
+    // control through Accessibility or posts the click to the target window.
+    const b = button === 'right' ? 1 : button === 'middle' ? 2 : 0;
+    await this.helper.request(`click ${this.requireTarget().pid} ${b} ${gx} ${gy} ${count} ${flags}`);
   }
 
   async move(x: number, y: number) {
@@ -317,7 +318,7 @@ export class BackgroundSession extends DriverSession {
             lastScreenshot: this.lastScreenshot?.dims ?? null,
           }, null, 2));
         case 'open_application':
-          return text(await this.openApplication(String(args.app ?? '')));
+          return await this.withScreenshot(name, args, text(await this.openApplication(String(args.app ?? ''))));
         case 'screenshot':
         case 'zoom':
           if (this.policy.allowedBundleIds === null) {

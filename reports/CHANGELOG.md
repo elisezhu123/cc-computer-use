@@ -3,6 +3,19 @@
 ## 未发布
 
 ### 新增
+- **AI 光标**（原生后台模式）：屏幕上用一个橘色箭头（Claude 的品牌色）显示 AI 正在操作的位置，点击时有波纹；它是不接收鼠标的悬浮窗，
+  不移动你的真实光标，也不会出现在截图里。`CU_AGENT_CURSOR=0` 关闭。
+- **动作后自动截图**（所有模式）：点击、输入、按键、滚动、拖拽、`open_application`、`computer_batch` 的结果里直接附上新截图，
+  模型不用每一步再单独调用 `screenshot`，每一步少一次模型来回。`CU_AUTO_SCREENSHOT=0` 关闭。
+
+### 变更
+- 原生后台模式的点击：按钮、复选框、菜单项、链接等标准控件改为通过辅助功能接口（AXPress）触发，后台窗口也能响应；
+  点到输入框时先设置焦点；其他位置的鼠标事件带上目标窗口编号（字段 91/92），让系统把点击交给该窗口。`CU_BACKGROUND_AX=0` 关闭辅助功能点击。
+- 每次点击只向 Swift 小工具发一条请求（原来是移动、按下、松开分别发送）。
+
+## v3.1.0 — 浏览器模式、后台模式、更快的动作
+
+### 新增
 - **浏览器模式**（`dist/browser.js`）：通过 Chrome DevTools 协议控制一个独立的 Chrome，不占用系统鼠标键盘；窗口被遮挡、最小化或无界面时照常工作，后台不节流。新增 `navigate` 工具。
 - **原生后台模式**（`dist/background.js`，实验性）：用 `CGEventPostToPid` 把输入直接发给指定应用、只截取该应用窗口，不移动光标。
 - 新增 [BACKGROUND.md](../BACKGROUND.md)，介绍上述两种模式和在虚拟机里运行的方法。
@@ -32,7 +45,7 @@
 - 启动预检失败时，同时打印 `PreflightError` 附带的修复方法（之前只打印了错误信息）。
 - 按键支持 xdotool 风格的键名（`Down`、`Page_Down`、`Prior`、`super` 等），
   这正是官方 computer-use 使用的写法；之前 `key "Down"` 会被 cliclick 拒绝。
-- 未安装 `cliclick` 时，`input.test.ts` 中依赖真实 cliclick 的 4 个测试改为明确跳过，
+- 未安装 `cliclick` 时，`input.test.ts` 中依赖真实 cliclick 的测试改为明确跳过，
   不再出现“空跑通过”或误报失败。
 
 ### 其他

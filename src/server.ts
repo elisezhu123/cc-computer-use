@@ -41,6 +41,7 @@ import {
   filterAppsForDescription,
 } from './apps.js';
 import type { InstalledApp } from './types.js';
+import { autoScreenshotEnabled, withAutoScreenshot } from './autoScreenshot.js';
 import {
   newSession,
   assertActionAllowed,
@@ -61,6 +62,8 @@ export interface ServerContext {
   lastScreenshot: { png: Buffer; dims: ScreenshotDims } | null;
   installed: InstalledApp[];
   installedNames: string[];
+  /** Attach a screenshot to screen-changing actions; defaults to CU_AUTO_SCREENSHOT. */
+  autoScreenshot?: boolean;
 }
 
 function activeDisplay(ctx: ServerContext): AttachedDisplay {
@@ -398,6 +401,16 @@ async function doBatch(
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 
 export async function dispatch(
+  ctx: ServerContext,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const result = await dispatchAction(ctx, name, args);
+  if (!(ctx.autoScreenshot ?? autoScreenshotEnabled())) return result;
+  return withAutoScreenshot(name, args, result, () => doScreenshot(ctx, false));
+}
+
+async function dispatchAction(
   ctx: ServerContext,
   name: string,
   args: Record<string, unknown>,

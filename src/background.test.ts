@@ -54,6 +54,7 @@ async function session() {
     launched.push(id);
     helper.running.set(id, 5151);
   });
+  s.autoScreenshot = false;
   return { s, helper, launched };
 }
 
@@ -87,18 +88,15 @@ test('input is posted to the target pid at window-relative global points', async
 
   helper.lines = [];
   await s.dispatchAll('left_click', { coordinate: [Math.round(400 / k), Math.round(300 / k)], text: 'cmd' });
-  const click = helper.lines.filter((l) => l.startsWith('mouse'));
-  assert.deepEqual(click, [
-    'mouse 4242 move 0 500 350 1 0',
-    `mouse 4242 down 0 500 350 1 ${FLAG_COMMAND}`,
-    `mouse 4242 up 0 500 350 1 ${FLAG_COMMAND}`,
-  ]);
+  assert.deepEqual(helper.lines.filter((l) => l.startsWith('click')), [`click 4242 0 500 350 1 ${FLAG_COMMAND}`]);
 
   helper.lines = [];
   await s.dispatchAll('double_click', { coordinate: [0, 0] });
-  assert.deepEqual(helper.lines.filter((l) => / (down|up) /.test(l)).map((l) => l.split(' ').slice(2, 7).join(' ')), [
-    'down 0 100 50 1', 'up 0 100 50 1', 'down 0 100 50 2', 'up 0 100 50 2',
-  ]);
+  assert.deepEqual(helper.lines.filter((l) => l.startsWith('click')), ['click 4242 0 100 50 2 0']);
+
+  helper.lines = [];
+  await s.dispatchAll('right_click', { coordinate: [0, 0] });
+  assert.deepEqual(helper.lines.filter((l) => l.startsWith('click')), ['click 4242 1 100 50 1 0']);
 
   helper.lines = [];
   await s.dispatchAll('type', { text: '你好\nok' });
@@ -136,4 +134,27 @@ test('background tools offer the app tools and drop desktop-only ones', () => {
   const names = buildBackgroundTools().map((t) => t.name);
   for (const n of ['request_access', 'open_application', 'screenshot', 'computer_batch']) assert.ok(names.includes(n), n);
   for (const n of ['switch_display', 'read_clipboard', 'navigate']) assert.ok(!names.includes(n), n);
+});
+
+test('with auto screenshots, actions return the new window state', async () => {
+  const { s } = await session();
+  s.autoScreenshot = true;
+  s.autoScreenshotSettleMs = 0;
+  await s.dispatchAll('request_access', { apps: ['TextEdit'], reason: 't' });
+  const opened = await s.dispatchAll('open_application', { app: 'TextEdit' });
+  assert.ok(opened.content.some((c) => c.type === 'image'), 'open_application shows the target');
+
+  const clicked = await s.dispatchAll('left_click', { coordinate: [10, 10] });
+  assert.match(txt(clicked), /Screenshot after the action: \d+x\d+ pixels/);
+  assert.equal(clicked.content.filter((c) => c.type === 'image').length, 1);
+
+  const moved = await s.dispatchAll('mouse_move', { coordinate: [10, 10] });
+  assert.ok(!moved.content.some((c) => c.type === 'image'), 'moving alone changes nothing on screen');
+
+  const batch = await s.dispatchAll('computer_batch', { actions: [{ action: 'key', text: 'a' }, { action: 'screenshot' }] });
+  assert.equal(batch.content.filter((c) => c.type === 'image').length, 1, 'a trailing screenshot is not repeated');
+  assert.doesNotMatch(txt(batch), /Screenshot after the action/);
+
+  const refused = await s.dispatchAll('key', { text: 'cmd+q' });
+  assert.ok(refused.isError && !refused.content.some((c) => c.type === 'image'), 'errors carry no screenshot');
 });

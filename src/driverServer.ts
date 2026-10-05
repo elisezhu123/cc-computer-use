@@ -15,6 +15,7 @@ import { API_RESIZE_PARAMS, targetImageSize } from './imageResize.js';
 import { clampRegion, type ScreenshotDims } from './coords.js';
 import { zoomRegion } from './screen.js';
 import type { ScrollDirection } from './types.js';
+import { autoScreenshotEnabled, withAutoScreenshot, AUTO_SCREENSHOT_SETTLE_MS } from './autoScreenshot.js';
 
 export type MouseButton = 'left' | 'right' | 'middle';
 
@@ -85,6 +86,9 @@ export class DriverSession {
   lastScreenshot: { png: Buffer; dims: ScreenshotDims; width: number; height: number } | null = null;
   /** Last pointer position in driver units. */
   cursor = { x: 0, y: 0 };
+  /** Attach a screenshot to each screen-changing action (see autoScreenshot.ts). */
+  autoScreenshot = autoScreenshotEnabled();
+  autoScreenshotSettleMs = AUTO_SCREENSHOT_SETTLE_MS;
 
   constructor(readonly driver: Driver) {}
 
@@ -201,6 +205,16 @@ export class DriverSession {
 
   /** Handles the DRIVER_TOOL_NAMES tools. Errors come back as isError results. */
   async dispatch(name: string, args: Record<string, unknown>): Promise<ToolResult> {
+    return this.withScreenshot(name, args, await this.dispatchAction(name, args));
+  }
+
+  /** Adds the after-action screenshot when enabled. */
+  withScreenshot(name: string, args: Record<string, unknown>, result: ToolResult): Promise<ToolResult> {
+    if (!this.autoScreenshot) return Promise.resolve(result);
+    return withAutoScreenshot(name, args, result, () => this.screenshot(), this.autoScreenshotSettleMs);
+  }
+
+  private async dispatchAction(name: string, args: Record<string, unknown>): Promise<ToolResult> {
     try {
       switch (name) {
         case 'screenshot':

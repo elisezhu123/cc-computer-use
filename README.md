@@ -35,8 +35,9 @@ AI 可以操作 macOS 上的软件和浏览器，也可以在浏览器里玩回�
 |------|------|----------|------------------|
 | **桌面模式**（默认） | `dist/index.js` | 所有已授权的 macOS 应用 | 是 |
 | **浏览器模式** | `dist/browser.js` | 一个独立的 Chrome（网页、浏览器游戏） | **否**，窗口可遮挡、最小化或无界面 |
-| **原生后台模式**（实验性） | `dist/background.js` | 指定的一个 macOS 应用 | **否**；但应用可能忽略后台点击 |
+| **原生后台模式**（实验性） | `dist/background.js` | 指定的一个 macOS 应用 | **否**：显示一个橘色的 AI 光标，你的光标不动 |
 
+不想让 AI 占用鼠标时，用浏览器模式（网页）或原生后台模式（macOS 应用）。
 后台模式的详细说明、以及在虚拟机里运行的方法，见 [BACKGROUND.md](BACKGROUND.md)。
 
 ### 特性
@@ -52,7 +53,8 @@ AI 可以操作 macOS 上的软件和浏览器，也可以在浏览器里玩回�
   - 前台应用检查用 `lsappinfo`，不再发 AppleScript；
   - 每次点击只启动一次 cliclick；
   - 长文本改为粘贴；
-  - `computer_batch` 一次调用执行多步。
+  - `computer_batch` 一次调用执行多步；
+  - 点击、输入、按键后自动附上新截图，模型不必再单独截图，每一步少一次来回（`CU_AUTO_SCREENSHOT=0` 关闭）。
 - **两种传输**：stdio（默认），以及 Streamable HTTP / SSE（[Gateway](computer-use-mcp-server/GATEWAY.md)）。
 - **安全调用外部命令**：统一使用 `execFile` + argv，不拼接 shell 字符串，输入的文本不会造成命令注入。
 
@@ -193,7 +195,7 @@ node test-tools.mjs      # 真机冒烟：启动桌面模式并列出工具（�
 - 仅支持 macOS。
 - 每一步都是“截图 → 模型思考 → 执行”，一个来回需要几秒，不适合需要实时反应的游戏。
 - 桌面模式通过 cliclick 模拟输入，某些限制合成事件的应用（部分游戏、安全输入框）可能不响应。
-- 原生后台模式尚未在真机上验证，且应用可能忽略发给后台窗口的点击。
+- 原生后台模式的 AI 光标和辅助功能点击尚未在真机上验证；不是标准控件的位置（例如画布、自绘界面）仍要靠发给后台窗口的鼠标事件，应用可能忽略。
 
 ### 许可
 
@@ -228,8 +230,9 @@ It lets an AI operate macOS apps and browsers, including slower-paced browser ga
 |------|-------------|----------|------------------------------|
 | **Desktop** (default) | `dist/index.js` | Any granted macOS app | Yes |
 | **Browser** | `dist/browser.js` | A separate Chrome (web pages, browser games) | **No**; the window can be covered, minimized or headless |
-| **Native background** (experimental) | `dist/background.js` | One chosen macOS app | **No**; but apps may ignore background clicks |
+| **Native background** (experimental) | `dist/background.js` | One chosen macOS app | **No**: an orange agent cursor shows the clicks, yours stays put |
 
+To keep your mouse free, use browser mode (web pages) or native background mode (macOS apps).
 See [BACKGROUND.md](BACKGROUND.md) (Chinese) for the background modes and for running inside a virtual machine.
 
 ### Features
@@ -246,7 +249,8 @@ See [BACKGROUND.md](BACKGROUND.md) (Chinese) for the background modes and for ru
   - the frontmost check uses `lsappinfo` instead of AppleScript;
   - each click takes a single cliclick process;
   - long text is pasted;
-  - `computer_batch` runs several steps in one call.
+  - `computer_batch` runs several steps in one call;
+  - clicks, typing and keys return a fresh screenshot, so the model needs no separate screenshot call per step (`CU_AUTO_SCREENSHOT=0` turns this off).
 - **Two transports**: stdio (default), and Streamable HTTP / SSE ([gateway](computer-use-mcp-server/GATEWAY.md)).
 - **Safe process calls**: everything goes through `execFile` with an argv array, never a shell string, so typed text cannot inject commands.
 
@@ -386,7 +390,7 @@ Full setup and troubleshooting (Chinese): [INSTALL.md](INSTALL.md).
 - macOS only.
 - Each step is "screenshot → model → action", a few seconds per round trip, so real-time games are out of reach.
 - Desktop mode synthesizes input with cliclick; apps that reject synthetic events (some games, secure input fields) may not respond.
-- Native background mode is not yet verified on a Mac, and apps may ignore clicks sent to background windows.
+- Native background mode's agent cursor and Accessibility clicks are not yet verified on a Mac; clicks outside standard controls (canvases, custom-drawn UI) still rely on mouse events sent to a background window, which apps may ignore.
 
 ### License
 
