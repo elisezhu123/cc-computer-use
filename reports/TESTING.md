@@ -8,15 +8,15 @@ npm run typecheck # 只做类型检查
 ```
 
 单元测试不需要屏幕录制或辅助功能权限，也不会移动鼠标或按键。
-其中 4 个测试会调用真实的 `cliclick` 做参数校验，未安装 cliclick（例如在 Linux CI 上）时会自动跳过：
+其中 5 个测试会调用真实的 `cliclick` 做参数校验，未安装 cliclick（例如在 Linux CI 上）时会自动跳过：
 
 ```
-# tests 68
-# pass 64
-# skipped 4    ← cliclick is not installed (brew install cliclick)
+# tests 84
+# pass 79
+# skipped 5    ← cliclick is not installed (brew install cliclick)
 ```
 
-在装有 cliclick 的 Mac 上，68 个测试应全部通过。
+在装有 cliclick 的 Mac 上，84 个测试应全部通过。
 
 ## 测试文件
 
@@ -24,7 +24,7 @@ npm run typecheck # 只做类型检查
 |------|------|----------|
 | `coords.test.ts` | 13 | `targetImageSize` 的长边和 token 双约束（包括 14" MBP 的 1568×1014 陷阱、竖屏）、模型像素 ↔ 逻辑点互逆映射、未截图时坐标直通、`clampRegion` |
 | `coords.fullspace.test.ts` | 18 | 内置 Retina、外接 4K HiDPI、非 Retina、截图大于显示器四种显示器，各测 4 项：四个角精确映射、全屏往返误差 ≤ 1pt、单调且不越界、`1/scaleFactor` 公式会明显出错；另有 `clampRegion` 退化/反向矩形和越界坐标行为 |
-| `input.test.ts` | 7 | 键名映射、组合键拆分；**用真实 cliclick 的 `-m test` 模式**校验我们生成的每个参数都能被接受，并确认 `kp:cmd`、`kp:a` 会被拒绝 |
+| `input.test.ts` | 9 | 键名映射、组合键拆分；**用真实 cliclick 的 `-m test` 模式**校验我们生成的每个参数（含单进程点击 `moveAndClick`）都能被接受，并确认 `kp:cmd`、`kp:a` 会被拒绝 |
 | `policy.test.ts` | 16 | 快捷键黑名单（各种别名写法、`cmd+q+a` 后缀绕过）、默认所有应用可完全交互、严格模式下的应用分级、授权标志 |
 | `policy.truth.test.ts` | 6 | 白名单 × 分级（严格模式）× 动作类型的完整真值表；每种拒绝都返回可区分的错误码；白名单累加而不是覆盖 |
 | `browser.test.ts` | 4 | 浏览器模式：键名映射、组合键拆分、工具列表（去掉桌面专属工具和前台检查说明）、环境变量解析 |
