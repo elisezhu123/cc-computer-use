@@ -11,12 +11,12 @@ npm run typecheck # 只做类型检查
 其中 5 个测试会调用真实的 `cliclick` 做参数校验，未安装 cliclick（例如在 Linux CI 上）时会自动跳过：
 
 ```
-# tests 84
-# pass 79
+# tests 85
+# pass 80
 # skipped 5    ← cliclick is not installed (brew install cliclick)
 ```
 
-在装有 cliclick 的 Mac 上，84 个测试应全部通过。
+在装有 cliclick 的 Mac 上，85 个测试应全部通过。
 
 ## 测试文件
 
@@ -28,7 +28,7 @@ npm run typecheck # 只做类型检查
 | `policy.test.ts` | 16 | 快捷键黑名单（各种别名写法、`cmd+q+a` 后缀绕过）、默认所有应用可完全交互、严格模式下的应用分级、授权标志 |
 | `policy.truth.test.ts` | 6 | 白名单 × 分级（严格模式）× 动作类型的完整真值表；每种拒绝都返回可区分的错误码；白名单累加而不是覆盖 |
 | `browser.test.ts` | 4 | 浏览器模式：键名映射、组合键拆分、工具列表（去掉桌面专属工具和前台检查说明）、环境变量解析 |
-| `background.test.ts` | 7 | 原生后台模式：虚拟键码映射；用模拟的 Swift 小工具验证授权 / 选定目标 / 后台启动流程，以及点击、双击、输入（含换行）、组合键、滚动、拖拽发出的每条底层指令，和快捷键黑名单拦截 |
+| `background.test.ts` | 8 | 原生后台模式：虚拟键码映射；用模拟的 Swift 小工具验证授权 / 选定目标 / 后台启动流程，动作后自动截图，以及点击、双击、输入（含换行）、组合键、滚动、拖拽发出的每条底层指令，和快捷键黑名单拦截 |
 | `apps.test.ts` | 11 | 描述中的应用列表过滤：去掉后台组件和守护进程、强制保留 Finder/TextEdit、保留非 ASCII 名称、应用名字符白名单（防提示注入）；`resolveApp` 按名称/bundle ID 精确匹配，不做模糊猜测 |
 
 ## 真机冒烟测试（macOS）
