@@ -1,6 +1,6 @@
 # 版本演进
 
-## 未发布
+## v3.1.0 — 浏览器模式、后台模式、更快的动作
 
 ### 新增
 - **浏览器模式**（`dist/browser.js`）：通过 Chrome DevTools 协议控制一个独立的 Chrome，不占用系统鼠标键盘；窗口被遮挡、最小化或无界面时照常工作，后台不节流。新增 `navigate` 工具。
@@ -32,7 +32,7 @@
 - 启动预检失败时，同时打印 `PreflightError` 附带的修复方法（之前只打印了错误信息）。
 - 按键支持 xdotool 风格的键名（`Down`、`Page_Down`、`Prior`、`super` 等），
   这正是官方 computer-use 使用的写法；之前 `key "Down"` 会被 cliclick 拒绝。
-- 未安装 `cliclick` 时，`input.test.ts` 中依赖真实 cliclick 的 4 个测试改为明确跳过，
+- 未安装 `cliclick` 时，`input.test.ts` 中依赖真实 cliclick 的测试改为明确跳过，
   不再出现“空跑通过”或误报失败。
 
 ### 其他
