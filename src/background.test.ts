@@ -87,18 +87,15 @@ test('input is posted to the target pid at window-relative global points', async
 
   helper.lines = [];
   await s.dispatchAll('left_click', { coordinate: [Math.round(400 / k), Math.round(300 / k)], text: 'cmd' });
-  const click = helper.lines.filter((l) => l.startsWith('mouse'));
-  assert.deepEqual(click, [
-    'mouse 4242 move 0 500 350 1 0',
-    `mouse 4242 down 0 500 350 1 ${FLAG_COMMAND}`,
-    `mouse 4242 up 0 500 350 1 ${FLAG_COMMAND}`,
-  ]);
+  assert.deepEqual(helper.lines.filter((l) => l.startsWith('click')), [`click 4242 0 500 350 1 ${FLAG_COMMAND}`]);
 
   helper.lines = [];
   await s.dispatchAll('double_click', { coordinate: [0, 0] });
-  assert.deepEqual(helper.lines.filter((l) => / (down|up) /.test(l)).map((l) => l.split(' ').slice(2, 7).join(' ')), [
-    'down 0 100 50 1', 'up 0 100 50 1', 'down 0 100 50 2', 'up 0 100 50 2',
-  ]);
+  assert.deepEqual(helper.lines.filter((l) => l.startsWith('click')), ['click 4242 0 100 50 2 0']);
+
+  helper.lines = [];
+  await s.dispatchAll('right_click', { coordinate: [0, 0] });
+  assert.deepEqual(helper.lines.filter((l) => l.startsWith('click')), ['click 4242 1 100 50 1 0']);
 
   helper.lines = [];
   await s.dispatchAll('type', { text: '你好\nok' });
