@@ -58,6 +58,8 @@ let windowThatCanHandleField = CGEventField(rawValue: 92)!
 
 /// Where the arrow's tip sits inside the overlay window (bottom-left origin).
 let hotspot = NSPoint(x: 20, y: 44)
+/// Claude's orange (#D97757).
+let cursorColor = NSColor(srgbRed: 0xD9 / 255.0, green: 0x77 / 255.0, blue: 0x57 / 255.0, alpha: 1)
 let overlaySize = NSSize(width: 64, height: 64)
 
 final class CursorView: NSView {
@@ -74,8 +76,8 @@ final class CursorView: NSView {
         ring.bounds = CGRect(x: 0, y: 0, width: 2 * r, height: 2 * r)
         ring.position = hotspot
         ring.path = CGPath(ellipseIn: ring.bounds.insetBy(dx: 1, dy: 1), transform: nil)
-        ring.fillColor = NSColor.systemPurple.withAlphaComponent(0.25).cgColor
-        ring.strokeColor = NSColor.systemPurple.cgColor
+        ring.fillColor = cursorColor.withAlphaComponent(0.25).cgColor
+        ring.strokeColor = cursorColor.cgColor
         ring.lineWidth = 2
         ring.opacity = 0
 
@@ -88,7 +90,7 @@ final class CursorView: NSView {
         }
         path.closeSubpath()
         arrow.path = path
-        arrow.fillColor = NSColor.systemPurple.cgColor
+        arrow.fillColor = cursorColor.cgColor
         arrow.strokeColor = NSColor.white.cgColor
         arrow.lineWidth = 1.5
         arrow.lineJoin = .round

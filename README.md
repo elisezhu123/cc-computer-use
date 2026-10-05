@@ -35,7 +35,7 @@ AI 可以操作 macOS 上的软件和浏览器，也可以在浏览器里玩回�
 |------|------|----------|------------------|
 | **桌面模式**（默认） | `dist/index.js` | 所有已授权的 macOS 应用 | 是 |
 | **浏览器模式** | `dist/browser.js` | 一个独立的 Chrome（网页、浏览器游戏） | **否**，窗口可遮挡、最小化或无界面 |
-| **原生后台模式**（实验性） | `dist/background.js` | 指定的一个 macOS 应用 | **否**：显示一个紫色的 AI 光标，你的光标不动 |
+| **原生后台模式**（实验性） | `dist/background.js` | 指定的一个 macOS 应用 | **否**：显示一个橘色的 AI 光标，你的光标不动 |
 
 不想让 AI 占用鼠标时，用浏览器模式（网页）或原生后台模式（macOS 应用）。
 后台模式的详细说明、以及在虚拟机里运行的方法，见 [BACKGROUND.md](BACKGROUND.md)。
@@ -230,7 +230,7 @@ It lets an AI operate macOS apps and browsers, including slower-paced browser ga
 |------|-------------|----------|------------------------------|
 | **Desktop** (default) | `dist/index.js` | Any granted macOS app | Yes |
 | **Browser** | `dist/browser.js` | A separate Chrome (web pages, browser games) | **No**; the window can be covered, minimized or headless |
-| **Native background** (experimental) | `dist/background.js` | One chosen macOS app | **No**: a purple agent cursor shows the clicks, yours stays put |
+| **Native background** (experimental) | `dist/background.js` | One chosen macOS app | **No**: an orange agent cursor shows the clicks, yours stays put |
 
 To keep your mouse free, use browser mode (web pages) or native background mode (macOS apps).
 See [BACKGROUND.md](BACKGROUND.md) (Chinese) for the background modes and for running inside a virtual machine.
