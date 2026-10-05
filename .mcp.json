@@ -2,9 +2,7 @@
   "mcpServers": {
     "computer-use": {
       "command": "node",
-      "args": [
-        "${HOME}/Tools/Claude/computer-use-mcp-server/dist/index.js"
-      ]
+      "args": ["./dist/index.js"]
     }
   }
 }
