@@ -15,7 +15,7 @@
     "clean": "rm -rf dist",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "test": "tsc && node --test dist/*.test.js",
+    "test": "tsc && npm run copy-native && node --test dist/*.test.js",
     "typecheck": "tsc --noEmit",
     "copy-native": "mkdir -p dist/native && cp src/native/*.swift dist/native/",
     "start:gateway": "node dist/http-server.js",

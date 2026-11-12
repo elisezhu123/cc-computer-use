@@ -1,5 +1,5 @@
 /**
- * Runs native/background.swift as a long-lived child process: compiled with
+ * Runs a Swift helper from native/ as a long-lived child process: compiled with
  * swiftc on first use, then one request line in, one "ok ..."/"err ..." line
  * out. Requests are serialized, so replies always match their request.
  *
@@ -19,10 +19,33 @@ import { homedir } from 'node:os';
 const execFileAsync = promisify(execFile);
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SWIFT_SRC = join(HERE, 'native', 'background.swift');
 const CACHE_DIR = join(homedir(), '.cache', 'computer-use-mcp');
 
+export interface NativeHelperOptions {
+  /** File name under native/, e.g. "background.swift". */
+  source: string;
+  /** Cached binary name prefix, e.g. "cubg". */
+  binPrefix: string;
+  /** Name used in error messages and the stderr prefix. */
+  label: string;
+}
+
+const BACKGROUND: NativeHelperOptions = { source: 'background.swift', binPrefix: 'cubg', label: 'Background' };
+
+/**
+ * Split buffered stdout into complete lines plus the unterminated remainder.
+ * A single reply can be far larger than one pipe chunk (a screenshot is
+ * ~750KB of base64), so a line is only complete once its newline arrives.
+ */
+export function splitLines(buffer: string): { lines: string[]; rest: string } {
+  const parts = buffer.split('\n');
+  const rest = parts.pop() ?? '';
+  return { lines: parts.map((l) => l.trim()), rest };
+}
+
 export class NativeHelper {
+  constructor(private readonly opts: NativeHelperOptions = BACKGROUND) {}
+
   private child: ChildProcessWithoutNullStreams | null = null;
   private binary: Promise<string> | null = null;
   private buffer = '';
@@ -30,16 +53,17 @@ export class NativeHelper {
   private queue: Promise<unknown> = Promise.resolve();
 
   private async compile(): Promise<string> {
-    if (!existsSync(SWIFT_SRC)) throw new Error(`Background helper source is missing: ${SWIFT_SRC}`);
-    const hash = createHash('sha256').update(readFileSync(SWIFT_SRC)).digest('hex').slice(0, 12);
-    const bin = join(CACHE_DIR, `cubg-${hash}`);
+    const src = join(HERE, 'native', this.opts.source);
+    if (!existsSync(src)) throw new Error(`${this.opts.label} helper source is missing: ${src}`);
+    const hash = createHash('sha256').update(readFileSync(src)).digest('hex').slice(0, 12);
+    const bin = join(CACHE_DIR, `${this.opts.binPrefix}-${hash}`);
     if (existsSync(bin)) return bin;
     await mkdir(CACHE_DIR, { recursive: true });
     try {
-      await execFileAsync('swiftc', ['-O', '-o', bin, SWIFT_SRC], { timeout: 180_000 });
+      await execFileAsync('swiftc', ['-O', '-o', bin, src], { timeout: 180_000 });
     } catch (e) {
       throw new Error(
-        'Failed to compile the background input helper. Install the Xcode command line tools with ' +
+        `Failed to compile the ${this.opts.label.toLowerCase()} helper. Install the Xcode command line tools with ` +
           `\`xcode-select --install\`. (${e instanceof Error ? e.message.split('\n').slice(0, 5).join(' ') : String(e)})`,
       );
     }
@@ -52,18 +76,14 @@ export class NativeHelper {
     const child = spawn(await this.binary, [], { stdio: ['pipe', 'pipe', 'pipe'] });
     this.buffer = '';
     child.stdout.on('data', (d: Buffer) => {
-      this.buffer += d.toString();
-      let nl: number;
-      while ((nl = this.buffer.indexOf('\n')) >= 0) {
-        const line = this.buffer.slice(0, nl).trim();
-        this.buffer = this.buffer.slice(nl + 1);
-        this.waiting.shift()?.resolve(line);
-      }
+      const { lines, rest } = splitLines(this.buffer + d.toString());
+      this.buffer = rest;
+      for (const line of lines) this.waiting.shift()?.resolve(line);
     });
-    child.stderr.on('data', (d: Buffer) => process.stderr.write(`[cubg] ${d.toString()}`));
+    child.stderr.on('data', (d: Buffer) => process.stderr.write(`[${this.opts.binPrefix}] ${d.toString()}`));
     child.on('exit', (code) => {
       this.child = null;
-      for (const w of this.waiting.splice(0)) w.reject(new Error(`Background helper exited with code ${code}.`));
+      for (const w of this.waiting.splice(0)) w.reject(new Error(`${this.opts.label} helper exited with code ${code}.`));
     });
     this.child = child;
     return child;
@@ -83,13 +103,13 @@ export class NativeHelper {
         const timer = setTimeout(() => {
           this.waiting = this.waiting.filter((w) => w !== entry);
           child.kill();
-          reject(new Error('Background helper did not respond within 10s.'));
+          reject(new Error(`${this.opts.label} helper did not respond within 10s.`));
         }, 10_000);
         this.waiting.push(entry);
         child.stdin.write(`${line}\n`);
       });
       if (reply === 'ok' || reply.startsWith('ok ')) return reply.slice(3);
-      throw new Error(`Background helper: ${reply.replace(/^err /, '')}`);
+      throw new Error(`${this.opts.label} helper: ${reply.replace(/^err /, '')}`);
     };
     const result = this.queue.then(run, run);
     this.queue = result.catch(() => {});
