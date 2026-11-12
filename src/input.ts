@@ -1,6 +1,8 @@
 /**
- * cliclick wrapper - the input layer, standing in for the official build's
- * Rust/enigo native module.
+ * The input layer, standing in for the official build's Rust/enigo native
+ * module. Keyboard and text always go through cliclick. Mouse actions take an
+ * optional desktop helper and use it when given one (no process spawn per
+ * click); with null they go through cliclick as before.
  *
  * cliclick consumes Cocoa LOGICAL POINTS. All coordinates reaching this file
  * are already in logical space (see coords.ts); this module never scales.
@@ -14,6 +16,8 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import type { DesktopHelper } from './desktopHelper.js';
+import { middleClick } from './scroll.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -205,12 +209,29 @@ function modsOnly(p: ParsedChord): string[] {
 
 // ── Mouse ────────────────────────────────────────────────────────────────────
 
-export async function moveMouse(x: number, y: number): Promise<void> {
+/** CGEventFlags for the cliclick modifier names, for clicks sent by the helper. */
+const MODIFIER_FLAGS: Readonly<Record<string, number>> = {
+  shift: 0x20000,
+  ctrl: 0x40000,
+  alt: 0x80000,
+  cmd: 0x100000,
+  fn: 0x800000,
+};
+
+export function modifierFlags(modifiers: readonly string[]): number {
+  let flags = 0;
+  for (const m of modifiers) flags |= MODIFIER_FLAGS[toCliclickKey(m)] ?? 0;
+  return flags;
+}
+
+export async function moveMouse(x: number, y: number, helper: DesktopHelper | null = null): Promise<void> {
+  if (helper) return helper.move(x, y); // settles inside the helper
   await cliclick([`m:${Math.round(x)},${Math.round(y)}`]);
   await sleep(MOVE_SETTLE_MS);
 }
 
-export async function getMousePosition(): Promise<{ x: number; y: number }> {
+export async function getMousePosition(helper: DesktopHelper | null = null): Promise<{ x: number; y: number }> {
+  if (helper) return helper.cursor();
   const out = await cliclick(['p']);
   const m = /(-?\d+),(-?\d+)/.exec(out);
   if (!m) throw new Error(`cliclick p returned unparseable output: ${JSON.stringify(out)}`);
@@ -265,10 +286,17 @@ export async function click(
 export async function moveAndClick(
   x: number,
   y: number,
-  button: 'left' | 'right',
+  button: MouseButton,
   count: 1 | 2 | 3,
   modifiers: string[] = [],
+  helper: DesktopHelper | null = null,
 ): Promise<void> {
+  if (helper) {
+    const b = button === 'right' ? 1 : button === 'middle' ? 2 : 0;
+    return helper.click(b, x, y, count, modifierFlags(modifiers));
+  }
+  // cliclick has no middle-click token; the scroll helper synthesizes one.
+  if (button === 'middle') return middleClick(x, y, count);
   await cliclick(moveAndClickArgs(x, y, button, count, modifiers));
 }
 
@@ -294,11 +322,13 @@ export function moveAndClickArgs(
  * movement between them. Only the left button is supported - cliclick has no
  * right/other button down token.
  */
-export async function mouseDown(): Promise<void> {
+export async function mouseDown(helper: DesktopHelper | null = null): Promise<void> {
+  if (helper) return helper.down();
   await cliclick(['dd:.']);
 }
 
-export async function mouseUp(): Promise<void> {
+export async function mouseUp(helper: DesktopHelper | null = null): Promise<void> {
+  if (helper) return helper.up();
   await cliclick(['du:.']);
 }
 
@@ -306,7 +336,9 @@ export async function mouseUp(): Promise<void> {
 export async function drag(
   from: { x: number; y: number } | null,
   to: { x: number; y: number },
+  helper: DesktopHelper | null = null,
 ): Promise<void> {
+  if (helper) return helper.drag(from ?? (await helper.cursor()), to);
   if (from) await moveMouse(from.x, from.y);
   const dest = `${Math.round(to.x)},${Math.round(to.y)}`;
   // dd: begins the drag at the destination, dm: continues it there, du: ends

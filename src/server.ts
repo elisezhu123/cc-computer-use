@@ -30,7 +30,8 @@ import {
   type ScreenshotDims,
 } from './coords.js';
 import * as input from './input.js';
-import { scrollAt, middleClick, closeScrollHelper } from './scroll.js';
+import { scrollAt, closeScrollHelper } from './scroll.js';
+import { chooseClickPoint, describeHit, snapEnabled } from './snap.js';
 import { capture, zoomRegion } from './screen.js';
 import { pasteText, readClipboard, writeClipboard } from './clipboard.js';
 import {
@@ -75,6 +76,8 @@ export interface ServerContext {
    * undefined (the default) uses the shared helper when it is available.
    */
   helper?: DesktopHelper | null;
+  /** The frontmost app's bundle ID; defaults to asking LaunchServices. Injected by tests. */
+  frontmost?: () => Promise<string | null>;
 }
 
 async function helperFor(ctx: ServerContext): Promise<DesktopHelper | null> {
@@ -97,9 +100,57 @@ function toLogical(ctx: ServerContext, x: number, y: number): { x: number; y: nu
 async function guard(
   ctx: ServerContext,
   kind: 'read' | 'click' | 'type' | 'key' | 'scroll' | 'clipboard_read' | 'clipboard_write',
-): Promise<void> {
-  const frontmost = await getFrontmostBundleId();
+): Promise<string | null> {
+  const frontmost = await (ctx.frontmost ?? getFrontmostBundleId)();
   assertActionAllowed(ctx.session, frontmost, kind);
+  return frontmost;
+}
+
+/** How far, in screenshot pixels, a click may be moved onto a nearby control. */
+const SNAP_RADIUS_PX = 6;
+
+/**
+ * Turn a screenshot coordinate into the point to click, using Accessibility
+ * to see what is there. A point in the gap next to a control moves onto the
+ * control (see snap.ts); either way `note` says what was hit, so the model
+ * learns of a miss from this result instead of from the next screenshot.
+ *
+ * Without the helper, or when the lookup returns nothing, the point is used
+ * as given and the note is empty.
+ */
+export async function resolveClick(
+  ctx: ServerContext,
+  model: readonly [number, number],
+  helper: DesktopHelper | null,
+  frontmostBundleId: string | null,
+): Promise<{ point: { x: number; y: number }; note: string; snappedTo: { x: number; y: number } | null }> {
+  const d = activeDisplay(ctx);
+  const dims = ctx.lastScreenshot?.dims ?? null;
+  const point = toLogical(ctx, model[0], model[1]);
+  if (!helper) return { point, note: '', snappedTo: null };
+
+  const g = d.geometry;
+  const radius = dims ? (SNAP_RADIUS_PX * g.logicalWidth) / dims.targetWidth : SNAP_RADIUS_PX;
+  const hit = await helper.hit(point.x, point.y, radius);
+  const choice = chooseClickPoint(point, hit, {
+    frontmostBundleId,
+    radius,
+    enabled: snapEnabled(),
+    bounds: { x: g.originX ?? 0, y: g.originY ?? 0, w: g.logicalWidth, h: g.logicalHeight },
+  });
+  return {
+    point: choice.point,
+    note: describeHit(choice),
+    snappedTo: choice.snapped ? logicalToModel(choice.point.x, choice.point.y, dims, g) : null,
+  };
+}
+
+/** The sentence after "Clicked ... at screenshot (x, y)" in a click result. */
+function clickOutcome(r: Awaited<ReturnType<typeof resolveClick>>): string {
+  if (r.snappedTo) {
+    return `: snapped to (${r.snappedTo.x}, ${r.snappedTo.y}), ${r.note.replace(/^snapped to /, '')}`;
+  }
+  return ` = logical (${r.point.x}, ${r.point.y}).${r.note ? ` ${r.note}` : ''}`;
 }
 
 /** MCP content blocks we emit. Typed explicitly so a mixed text+image result
@@ -200,28 +251,21 @@ async function doClick(
   coord: number[],
   modifiers: string,
 ): Promise<ToolResult> {
-  await guard(ctx, 'click');
+  const frontmost = await guard(ctx, 'click');
   const mods = modifiers ? input.chordModifiers(modifiers) : [];
-
-  if (button === 'middle') {
-    // cliclick has no middle-click token; the Swift helper synthesizes a
-    // button-2 event instead.
-    if (mods.length > 0) {
-      throw new PolicyError(
-        'Modifiers are not supported with middle_click. Use left_click with modifiers instead.',
-        'bad_request',
-      );
-    }
-    const p = toLogical(ctx, coord[0]!, coord[1]!);
-    await middleClick(p.x, p.y, count);
-    return text(`Middle-clicked${count > 1 ? ` x${count}` : ''} at screenshot (${coord[0]}, ${coord[1]}).`);
+  if (button === 'middle' && mods.length > 0) {
+    throw new PolicyError(
+      'Modifiers are not supported with middle_click. Use left_click with modifiers instead.',
+      'bad_request',
+    );
   }
 
-  const p = toLogical(ctx, coord[0]!, coord[1]!);
-  await input.moveAndClick(p.x, p.y, button, count, mods);
+  const helper = await helperFor(ctx);
+  const r = await resolveClick(ctx, [coord[0]!, coord[1]!], helper, frontmost);
+  await input.moveAndClick(r.point.x, r.point.y, button, count, mods, helper);
+  const what = button === 'middle' ? 'Middle-clicked' : `Clicked ${button}`;
   return text(
-    `Clicked ${button}${count > 1 ? ` x${count}` : ''} at screenshot (${coord[0]}, ${coord[1]}) ` +
-      `= logical (${p.x}, ${p.y}).`,
+    `${what}${count > 1 ? ` x${count}` : ''} at screenshot (${coord[0]}, ${coord[1]})${clickOutcome(r)}`,
   );
 }
 
@@ -307,24 +351,28 @@ async function doBatch(
         case 'triple_click': {
           const button = action === 'right_click' ? 'right' : 'left';
           const count = action === 'double_click' ? 2 : action === 'triple_click' ? 3 : 1;
-          await guard(ctx, 'click');
+          const frontmost = await guard(ctx, 'click');
           if (!coord) throw new Error(`${action} requires a coordinate.`);
-          const p = toLogical(ctx, coord[0]!, coord[1]!);
+          const helper = await helperFor(ctx);
+          const r = await resolveClick(ctx, [coord[0]!, coord[1]!], helper, frontmost);
           await input.moveAndClick(
-            p.x,
-            p.y,
+            r.point.x,
+            r.point.y,
             button,
             count as 1 | 2 | 3,
             a.text ? input.chordModifiers(String(a.text)) : [],
+            helper,
           );
-          line = `${action} at (${coord.join(', ')})`;
+          line =
+            `${action} at (${coord.join(', ')})` +
+            (r.snappedTo ? clickOutcome(r) : r.note ? `: ${r.note}` : '');
           break;
         }
         case 'mouse_move': {
           await guard(ctx, 'click');
           if (!coord) throw new Error('mouse_move requires a coordinate.');
           const p = toLogical(ctx, coord[0]!, coord[1]!);
-          await input.moveMouse(p.x, p.y);
+          await input.moveMouse(p.x, p.y, await helperFor(ctx));
           line = `mouse_move to (${coord.join(', ')})`;
           break;
         }
@@ -334,7 +382,7 @@ async function doBatch(
           const start = a.start_coordinate as number[] | undefined;
           const to = toLogical(ctx, coord[0]!, coord[1]!);
           const from = start ? toLogical(ctx, start[0]!, start[1]!) : null;
-          await input.drag(from, to);
+          await input.drag(from, to, await helperFor(ctx));
           line = `left_click_drag to (${coord.join(', ')})`;
           break;
         }
@@ -377,19 +425,19 @@ async function doBatch(
           break;
         }
         case 'cursor_position': {
-          const p = await input.getMousePosition();
+          const p = await input.getMousePosition(await helperFor(ctx));
           line = `cursor_position (${p.x}, ${p.y}) logical`;
           break;
         }
         case 'left_mouse_down': {
           await guard(ctx, 'click');
-          await input.mouseDown();
+          await input.mouseDown(await helperFor(ctx));
           line = 'left_mouse_down';
           break;
         }
         case 'left_mouse_up': {
           await guard(ctx, 'click');
-          await input.mouseUp();
+          await input.mouseUp(await helperFor(ctx));
           line = 'left_mouse_up';
           break;
         }
@@ -572,7 +620,7 @@ async function dispatchAction(
       }
 
       case 'cursor_position': {
-        const p = await input.getMousePosition();
+        const p = await input.getMousePosition(await helperFor(ctx));
         const d = activeDisplay(ctx);
         const inModel = logicalToModel(p.x, p.y, ctx.lastScreenshot?.dims ?? null, d.geometry);
         return text(
@@ -592,7 +640,7 @@ async function dispatchAction(
         await guard(ctx, 'click');
         const c = reqCoord(args);
         const p = toLogical(ctx, c[0]!, c[1]!);
-        await input.moveMouse(p.x, p.y);
+        await input.moveMouse(p.x, p.y, await helperFor(ctx));
         return text(`Moved to screenshot (${c[0]}, ${c[1]}) = logical (${p.x}, ${p.y}).`);
       }
 
@@ -602,12 +650,12 @@ async function dispatchAction(
         const start = args.start_coordinate as number[] | undefined;
         const to = toLogical(ctx, c[0]!, c[1]!);
         const from = start ? toLogical(ctx, start[0]!, start[1]!) : null;
-        await input.drag(from, to);
+        await input.drag(from, to, await helperFor(ctx));
         return text(`Dragged ${from ? `from logical (${from.x}, ${from.y}) ` : ''}to logical (${to.x}, ${to.y}).`);
       }
 
-      case 'left_mouse_down': await guard(ctx, 'click'); await input.mouseDown(); return text('Left button is down.');
-      case 'left_mouse_up': await guard(ctx, 'click'); await input.mouseUp(); return text('Left button is up.');
+      case 'left_mouse_down': await guard(ctx, 'click'); await input.mouseDown(await helperFor(ctx)); return text('Left button is down.');
+      case 'left_mouse_up': await guard(ctx, 'click'); await input.mouseUp(await helperFor(ctx)); return text('Left button is up.');
 
       case 'type': return await doType(ctx, String(args.text ?? ''));
 
