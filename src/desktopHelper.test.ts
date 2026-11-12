@@ -135,11 +135,15 @@ test('createDesktopHelper: a non-finite coordinate never reaches the helper', as
   await assert.rejects(h.click(0, Number.NaN, 0, 1, 0), /coordinate/);
 });
 
-test('hit on the menu bar finds a menu bar item', async (t) => {
+test('hit reports an Accessibility element with a role and a frame', async (t) => {
   const live = await liveHelper(t);
   if (!live) return;
+  // Which element is at the top-left depends on the frontmost app (a menu bar
+  // item, the menu bar, or a full-screen window), so only its shape is checked.
   const hit = await live.hit(40, 12, 8);
-  assert.equal(hit.at?.role, 'AXMenuBarItem');
+  assert.ok(hit.at, 'Accessibility returned nothing - is the Accessibility permission granted?');
+  assert.match(hit.at.role, /^AX/);
+  assert.ok(hit.at.frame.w > 0 && hit.at.frame.h > 0);
 });
 
 test('malformed mouse requests are rejected by the helper', async (t) => {
