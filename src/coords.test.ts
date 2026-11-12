@@ -106,3 +106,23 @@ test('clampRegion keeps the region inside the image and ordered', () => {
   // out of bounds is clamped
   assert.deepEqual(clampRegion([-50, -50, 99999, 99999], dims), [0, 0, 1372, 888]);
 });
+
+// A secondary display to the upper-left of the main one (negative origin).
+const LEFT_4K = { logicalWidth: 1920, logicalHeight: 1080, scaleFactor: 2, originX: -1085, originY: -1080 };
+const DIMS_4K = { targetWidth: 1456, targetHeight: 819 };
+
+test('modelToLogical adds the display origin', () => {
+  assert.deepEqual(modelToLogical(0, 0, DIMS_4K, LEFT_4K), { x: -1085, y: -1080 });
+  assert.deepEqual(modelToLogical(728, 410, DIMS_4K, LEFT_4K), { x: -125, y: -539 });
+});
+
+test('logicalToModel subtracts the display origin and round-trips', () => {
+  assert.deepEqual(logicalToModel(-1085, -1080, DIMS_4K, LEFT_4K), { x: 0, y: 0 });
+  const p = modelToLogical(1000, 500, DIMS_4K, LEFT_4K);
+  const back = logicalToModel(p.x, p.y, DIMS_4K, LEFT_4K);
+  assert.ok(Math.abs(back.x - 1000) <= 1 && Math.abs(back.y - 500) <= 1);
+});
+
+test('a geometry without an origin behaves as before', () => {
+  assert.deepEqual(modelToLogical(686, 443, { targetWidth: 1372, targetHeight: 887 }, BUILTIN), { x: 864, y: 558 });
+});

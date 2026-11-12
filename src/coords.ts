@@ -11,8 +11,10 @@
  * Because the screenshot handed to the model IS apiTarget-sized, the
  * model->physical step is identity, and the mapping to cliclick space is:
  *
- *   logical = model * (logicalW / targetW)
+ *   logical = origin + model * (logicalW / targetW)
  *
+ * The origin is the display's top-left in global points: (0, 0) for the main
+ * display, and often negative for a display placed to its left or above it.
  * Both dimensions are required. It is NOT `1 / scaleFactor` - that mistake
  * produces a ~21% click offset on a 14" MBP (logical 1512, target 1372).
  *
@@ -27,6 +29,9 @@ export interface DisplayGeometry {
   logicalHeight: number;
   /** logical -> physical multiplier. 2 on Retina, 1 on non-Retina. */
   scaleFactor: number;
+  /** Top-left of this display in global points. Omitted means (0, 0), the main display. */
+  originX?: number;
+  originY?: number;
 }
 
 export interface ScreenshotDims {
@@ -64,7 +69,10 @@ export function modelToLogical(
   }
   const sx = display.logicalWidth / dims.targetWidth;
   const sy = display.logicalHeight / dims.targetHeight;
-  return { x: Math.round(x * sx), y: Math.round(y * sy) };
+  return {
+    x: (display.originX ?? 0) + Math.round(x * sx),
+    y: (display.originY ?? 0) + Math.round(y * sy),
+  };
 }
 
 /** Inverse of modelToLogical - for cursor_position reporting. */
@@ -79,7 +87,10 @@ export function logicalToModel(
   }
   const sx = dims.targetWidth / display.logicalWidth;
   const sy = dims.targetHeight / display.logicalHeight;
-  return { x: Math.round(x * sx), y: Math.round(y * sy) };
+  return {
+    x: Math.round((x - (display.originX ?? 0)) * sx),
+    y: Math.round((y - (display.originY ?? 0)) * sy),
+  };
 }
 
 /** Crop a region from model-space into model-space [x0,y0,x1,y1], clamped. */
