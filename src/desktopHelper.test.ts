@@ -1,7 +1,7 @@
 import { test, after, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
-import { splitLines } from './nativeHelper.js';
+import { NativeHelper, splitLines } from './nativeHelper.js';
 import {
   closeDesktopHelper,
   createDesktopHelper,
@@ -97,4 +97,57 @@ test('shot of an unknown display is an error, not a hang', async (t) => {
   const live = await liveHelper(t);
   if (!live) return;
   await assert.rejects(live.shot(999999, 640, 400, 0, 0), /no such display/);
+});
+
+// ── Mouse and hit testing ────────────────────────────────────────────────────
+
+test('createDesktopHelper: mouse and hit requests', async () => {
+  const sent: string[] = [];
+  const h = createDesktopHelper({
+    close() {},
+    async request(line) {
+      sent.push(line);
+      return line.startsWith('hit')
+        ? JSON.stringify({
+            at: { role: 'AXButton', label: 'Save\nnow', frame: { x: 1, y: 2, w: 3, h: 4 }, bundleId: 'a.b' },
+            nearby: [],
+          })
+        : '';
+    },
+  });
+  await h.click(0, 519.4, 48.6, 2, 0x100000);
+  await h.move(10, 20);
+  await h.down();
+  await h.up();
+  await h.drag({ x: 1, y: 2 }, { x: 3, y: 4 });
+  const hit = await h.hit(5, 6, 7.557);
+  assert.deepEqual(sent, ['click 0 519 49 2 1048576', 'move 10 20', 'down', 'up', 'drag 1 2 3 4', 'hit 5 6 7.56']);
+  assert.equal(hit.at!.label, 'Save now', 'labels are sanitized on the way in');
+});
+
+test('createDesktopHelper: a failed hit is empty, not an error', async () => {
+  const h = createDesktopHelper({ close() {}, async request() { throw new Error('Desktop helper: ax timeout'); } });
+  assert.deepEqual(await h.hit(1, 1, 8), { at: null, nearby: [] });
+});
+
+test('createDesktopHelper: a non-finite coordinate never reaches the helper', async () => {
+  const h = createDesktopHelper({ close() {}, async request() { throw new Error('must not be called'); } });
+  await assert.rejects(h.click(0, Number.NaN, 0, 1, 0), /coordinate/);
+});
+
+test('hit on the menu bar finds a menu bar item', async (t) => {
+  const live = await liveHelper(t);
+  if (!live) return;
+  const hit = await live.hit(40, 12, 8);
+  assert.equal(hit.at?.role, 'AXMenuBarItem');
+});
+
+test('malformed mouse requests are rejected by the helper', async (t) => {
+  if (!(await liveHelper(t))) return;
+  const raw = new NativeHelper({ source: 'desktop.swift', binPrefix: 'cudesk', label: 'Desktop' });
+  try {
+    await assert.rejects(raw.request('click 0 abc 0 1 0'), /bad click request/);
+  } finally {
+    raw.close();
+  }
 });

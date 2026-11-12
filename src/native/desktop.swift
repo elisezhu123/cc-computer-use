@@ -251,6 +251,178 @@ func zoom(x0: Int, y0: Int, x1: Int, y1: Int, ow: Int, oh: Int) -> String {
     return "ok \(b64)"
 }
 
+// ── Mouse ────────────────────────────────────────────────────────────────────
+
+let eventSource = CGEventSource(stateID: .hidSystemState)
+
+/// Time for the target app to process the move before the button goes down.
+let MOVE_SETTLE_US: UInt32 = 50_000
+
+func cursorLocation() -> CGPoint { CGEvent(source: nil)?.location ?? .zero }
+
+@discardableResult
+func postMouse(
+    _ type: CGEventType, _ p: CGPoint, button: CGMouseButton = .left,
+    clickState: Int64 = 1, flags: UInt64 = 0
+) -> Bool {
+    guard let e = CGEvent(mouseEventSource: eventSource, mouseType: type, mouseCursorPosition: p, mouseButton: button)
+    else { return false }
+    e.setIntegerValueField(.mouseEventClickState, value: clickState)
+    if flags != 0 { e.flags = CGEventFlags(rawValue: flags) }
+    e.post(tap: .cghidEventTap)
+    return true
+}
+
+func buttonEvents(_ button: Int) -> (down: CGEventType, up: CGEventType, button: CGMouseButton)? {
+    switch button {
+    case 0: return (.leftMouseDown, .leftMouseUp, .left)
+    case 1: return (.rightMouseDown, .rightMouseUp, .right)
+    case 2: return (.otherMouseDown, .otherMouseUp, .center)
+    default: return nil
+    }
+}
+
+/// Move, settle, then press and release `count` times as one multi-click.
+func click(button: Int, at p: CGPoint, count: Int, flags: UInt64) -> Bool {
+    guard let b = buttonEvents(button) else { return false }
+    var ok = postMouse(.mouseMoved, p)
+    usleep(MOVE_SETTLE_US)
+    for i in 1...count {
+        ok = postMouse(b.down, p, button: b.button, clickState: Int64(i), flags: flags) && ok
+        usleep(8_000)
+        ok = postMouse(b.up, p, button: b.button, clickState: Int64(i), flags: flags) && ok
+        if i < count { usleep(8_000) }
+    }
+    return ok
+}
+
+/// Press at `from`, move to `to` in steps, release. The intermediate drag
+/// events are what most drop targets need to recognise the gesture.
+func drag(from: CGPoint, to: CGPoint) -> Bool {
+    var ok = postMouse(.mouseMoved, from)
+    usleep(MOVE_SETTLE_US)
+    ok = postMouse(.leftMouseDown, from) && ok
+    let steps = 10
+    for i in 1...steps {
+        usleep(10_000)
+        let t = Double(i) / Double(steps)
+        let p = CGPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t)
+        ok = postMouse(.leftMouseDragged, p) && ok
+    }
+    usleep(10_000)
+    return postMouse(.leftMouseUp, to) && ok
+}
+
+// ── Accessibility hit testing ────────────────────────────────────────────────
+
+let systemWide: AXUIElement = {
+    let el = AXUIElementCreateSystemWide()
+    // An unresponsive app must not stall a click: give up quickly and click
+    // without the element information.
+    AXUIElementSetMessagingTimeout(el, 0.15)
+    return el
+}()
+
+/// Controls that act when clicked. Keep in sync with ACTIONABLE_ROLES in
+/// snap.ts. Used here only to report the control rather than the label or
+/// icon inside it (a hit test returns the deepest element).
+let ACTIONABLE_ROLES: Set<String> = [
+    "AXButton", "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXMenuButton",
+    "AXMenuItem", "AXMenuBarItem", "AXLink", "AXTextField", "AXTextArea",
+    "AXComboBox", "AXSlider", "AXIncrementor", "AXDisclosureTriangle", "AXTab",
+    "AXSegment",
+]
+
+func axString(_ el: AXUIElement, _ attr: String) -> String? {
+    var v: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(el, attr as CFString, &v) == .success else { return nil }
+    return v as? String
+}
+
+func axParent(_ el: AXUIElement) -> AXUIElement? {
+    var v: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(el, kAXParentAttribute as CFString, &v) == .success,
+          let p = v, CFGetTypeID(p) == AXUIElementGetTypeID() else { return nil }
+    return (p as! AXUIElement)
+}
+
+func axFrame(_ el: AXUIElement) -> CGRect? {
+    var pv: CFTypeRef?
+    var sv: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(el, kAXPositionAttribute as CFString, &pv) == .success,
+          AXUIElementCopyAttributeValue(el, kAXSizeAttribute as CFString, &sv) == .success,
+          let p = pv, let s = sv,
+          CFGetTypeID(p) == AXValueGetTypeID(), CFGetTypeID(s) == AXValueGetTypeID() else { return nil }
+    var origin = CGPoint.zero
+    var size = CGSize.zero
+    guard AXValueGetValue(p as! AXValue, .cgPoint, &origin), AXValueGetValue(s as! AXValue, .cgSize, &size) else {
+        return nil
+    }
+    return CGRect(origin: origin, size: size)
+}
+
+var bundleIDs: [pid_t: String] = [:]
+
+func bundleID(of el: AXUIElement) -> String? {
+    var pid: pid_t = 0
+    guard AXUIElementGetPid(el, &pid) == .success else { return nil }
+    if let known = bundleIDs[pid] { return known }
+    let id = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier
+    if let id { bundleIDs[pid] = id }
+    return id
+}
+
+/// The element at a point, promoted to the nearest actionable ancestor (up to
+/// 4 levels) when the deepest element is only its label or icon.
+func element(at p: CGPoint) -> AXUIElement? {
+    var hit: AXUIElement?
+    guard AXUIElementCopyElementAtPosition(systemWide, Float(p.x), Float(p.y), &hit) == .success,
+          let leaf = hit else { return nil }
+    if let role = axString(leaf, kAXRoleAttribute), ACTIONABLE_ROLES.contains(role) { return leaf }
+    var cur = leaf
+    for _ in 0..<4 {
+        guard let parent = axParent(cur) else { break }
+        if let role = axString(parent, kAXRoleAttribute), ACTIONABLE_ROLES.contains(role) { return parent }
+        cur = parent
+    }
+    return leaf
+}
+
+func describe(_ el: AXUIElement) -> [String: Any]? {
+    guard let role = axString(el, kAXRoleAttribute), let frame = axFrame(el) else { return nil }
+    let title = axString(el, kAXTitleAttribute) ?? ""
+    let label = title.isEmpty ? (axString(el, kAXDescriptionAttribute) ?? "") : title
+    return [
+        "role": role,
+        "label": label,
+        "frame": ["x": Double(frame.origin.x), "y": Double(frame.origin.y),
+                  "w": Double(frame.width), "h": Double(frame.height)],
+        "bundleId": bundleID(of: el) as Any? ?? NSNull(),
+    ]
+}
+
+/// The element under `p`, plus the distinct other elements found at 16 probe
+/// points around it (8 directions at half and full radius).
+func hitJSON(at p: CGPoint, radius: Double) -> String {
+    guard let centre = element(at: p), let at = describe(centre) else {
+        return jsonString(["at": NSNull(), "nearby": []] as [String: Any])
+    }
+    var seen: [AXUIElement] = [centre]
+    var nearby: [[String: Any]] = []
+    if radius > 0 {
+        for r in [radius / 2, radius] {
+            for k in 0..<8 {
+                let a = Double(k) * Double.pi / 4
+                let q = CGPoint(x: p.x + CGFloat(r * cos(a)), y: p.y + CGFloat(r * sin(a)))
+                guard let el = element(at: q), !seen.contains(where: { CFEqual($0, el) }) else { continue }
+                seen.append(el)
+                if let d = describe(el) { nearby.append(d) }
+            }
+        }
+    }
+    return jsonString(["at": at, "nearby": nearby] as [String: Any])
+}
+
 // ── Requests ─────────────────────────────────────────────────────────────────
 
 func handle(_ line: String) {
@@ -262,7 +434,7 @@ func handle(_ line: String) {
         reply("ok \(displaysJSON())")
 
     case "pos":
-        let p = CGEvent(source: nil)?.location ?? .zero
+        let p = cursorLocation()
         reply("ok \(Int(p.x.rounded())) \(Int(p.y.rounded()))")
 
     case "shot":
@@ -278,6 +450,44 @@ func handle(_ line: String) {
             reply("err bad zoom request: \(line)"); return
         }
         reply(zoom(x0: x0, y0: y0, x1: x1, y1: y1, ow: ow, oh: oh))
+
+    case "hit":
+        guard f.count == 4, let x = Double(f[1]), let y = Double(f[2]), let r = Double(f[3]),
+              x.isFinite, y.isFinite, r.isFinite, r >= 0 else {
+            reply("err bad hit request: \(line)"); return
+        }
+        reply("ok \(hitJSON(at: CGPoint(x: x, y: y), radius: r))")
+
+    case "click":
+        guard f.count == 6, let button = Int(f[1]), let x = Double(f[2]), let y = Double(f[3]),
+              let count = Int(f[4]), let flags = UInt64(f[5]),
+              x.isFinite, y.isFinite, (1...3).contains(count), buttonEvents(button) != nil else {
+            reply("err bad click request: \(line)"); return
+        }
+        reply(click(button: button, at: CGPoint(x: x, y: y), count: count, flags: flags)
+            ? "ok" : "err could not create mouse event")
+
+    case "move":
+        guard f.count == 3, let x = Double(f[1]), let y = Double(f[2]), x.isFinite, y.isFinite else {
+            reply("err bad move request: \(line)"); return
+        }
+        let ok = postMouse(.mouseMoved, CGPoint(x: x, y: y))
+        usleep(MOVE_SETTLE_US)
+        reply(ok ? "ok" : "err could not create mouse event")
+
+    case "down":
+        reply(postMouse(.leftMouseDown, cursorLocation()) ? "ok" : "err could not create mouse event")
+
+    case "up":
+        reply(postMouse(.leftMouseUp, cursorLocation()) ? "ok" : "err could not create mouse event")
+
+    case "drag":
+        guard f.count == 5, let x0 = Double(f[1]), let y0 = Double(f[2]), let x1 = Double(f[3]),
+              let y1 = Double(f[4]), [x0, y0, x1, y1].allSatisfy({ $0.isFinite }) else {
+            reply("err bad drag request: \(line)"); return
+        }
+        reply(drag(from: CGPoint(x: x0, y: y0), to: CGPoint(x: x1, y: y1))
+            ? "ok" : "err could not create mouse event")
 
     default:
         reply("err unknown request: \(verb)")

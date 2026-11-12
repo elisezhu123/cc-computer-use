@@ -10,6 +10,7 @@
  */
 
 import { NativeHelper } from './nativeHelper.js';
+import { sanitizeLabel, type HitElement, type HitResult } from './snap.js';
 
 export interface HelperDisplay {
   /** CGDirectDisplayID. */
@@ -31,6 +32,19 @@ export interface DesktopHelper {
   shot(displayId: number, tw: number, th: number, minMs: number, maxMs: number): Promise<Buffer>;
   /** Region is in pixels of the last shot. Null when the helper holds no frame. */
   zoom(region: readonly [number, number, number, number], ow: number, oh: number): Promise<Buffer | null>;
+  /**
+   * What Accessibility reports at a point and within `radius` of it. Never
+   * throws: a failed or timed-out lookup is an empty result, so a click can
+   * always go ahead without it.
+   */
+  hit(x: number, y: number, radius: number): Promise<HitResult>;
+  /** Move, settle 50ms, click. button: 0 left, 1 right, 2 middle. flags: CGEventFlags. */
+  click(button: 0 | 1 | 2, x: number, y: number, count: number, flags: number): Promise<void>;
+  move(x: number, y: number): Promise<void>;
+  /** Left button down / up at the current cursor position. */
+  down(): Promise<void>;
+  up(): Promise<void>;
+  drag(from: { x: number; y: number }, to: { x: number; y: number }): Promise<void>;
   close(): void;
 }
 
@@ -41,6 +55,16 @@ export interface HelperTransport {
 
 export function helperEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.CU_NATIVE_HELPER !== '0';
+}
+
+/** Global logical points as integers; rejects NaN/Infinity before they reach the helper. */
+function pt(x: number, y: number): string {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error('A finite coordinate is required.');
+  return `${Math.round(x)} ${Math.round(y)}`;
+}
+
+function cleanElement(el: HitElement): HitElement {
+  return { ...el, label: sanitizeLabel(String(el.label ?? '')) };
 }
 
 export function createDesktopHelper(t: HelperTransport): DesktopHelper {
@@ -65,6 +89,29 @@ export function createDesktopHelper(t: HelperTransport): DesktopHelper {
         if (e instanceof Error && /no frame/.test(e.message)) return null;
         throw e;
       }
+    },
+    async hit(x, y, radius) {
+      try {
+        const raw = JSON.parse(await t.request(`hit ${pt(x, y)} ${radius.toFixed(2)}`)) as HitResult;
+        return { at: raw.at ? cleanElement(raw.at) : null, nearby: (raw.nearby ?? []).map(cleanElement) };
+      } catch {
+        return { at: null, nearby: [] };
+      }
+    },
+    async click(button, x, y, count, flags) {
+      await t.request(`click ${button} ${pt(x, y)} ${count} ${flags}`);
+    },
+    async move(x, y) {
+      await t.request(`move ${pt(x, y)}`);
+    },
+    async down() {
+      await t.request('down');
+    },
+    async up() {
+      await t.request('up');
+    },
+    async drag(from, to) {
+      await t.request(`drag ${pt(from.x, from.y)} ${pt(to.x, to.y)}`);
     },
     close() {
       t.close();
