@@ -3,6 +3,13 @@
 日期：2026-11-12
 范围：桌面模式（`src/index.ts` → `src/server.ts`）。后台模式和浏览器模式不改。
 
+> **实现后的修订（2026-11-12）**
+>
+> - 前台应用检查**没有**移进 helper：`NSWorkspace.frontmostApplication` 在 helper 进程里实测会过期，而它决定每个输入动作是否放行，
+>   所以仍然用 `lsappinfo`。下文的 `front` 指令和 `apps.ts` 的改动不存在。
+> - `shot` 不是"截全分辨率再缩小"，而是同时截目标尺寸和全分辨率两帧；稳定判定比较连续的目标尺寸帧，采样间隔 30ms。
+> - 一个动作加自动截图实测约 300ms（见 `reports/ARCHITECTURE.md` 的性能一节）。
+
 ## 背景
 
 ### 慢在哪里

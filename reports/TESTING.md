@@ -7,40 +7,52 @@ npm test          # tsc 编译后运行 node --test dist/*.test.js
 npm run typecheck # 只做类型检查
 ```
 
-单元测试不需要屏幕录制或辅助功能权限，也不会移动鼠标或按键。
-其中 5 个测试会调用真实的 `cliclick` 做参数校验，未安装 cliclick（例如在 Linux CI 上）时会自动跳过：
+测试不会移动鼠标、点击或按键。两类测试依赖本机环境，条件不满足时自动跳过：
+
+- 5 个测试调用真实的 `cliclick` 做参数校验，未安装 cliclick（例如在 Linux CI 上）时跳过；
+- 7 个测试启动真实的桌面 helper（截图尺寸、`zoom`、显示器几何、控件查询），需要 `swiftc`、屏幕录制和辅助功能权限；
+  没有这些，或设置了 `CU_NATIVE_HELPER=0` 时跳过。首次运行要编译 helper，会多花几十秒。
 
 ```
-# tests 85
-# pass 80
-# skipped 5    ← cliclick is not installed (brew install cliclick)
+# tests 134
+# pass 122
+# skipped 12
 ```
 
-在装有 cliclick 的 Mac 上，85 个测试应全部通过。
+在装有 cliclick 和 Xcode 命令行工具、并已授权的 Mac 上，134 个测试应全部通过。
+`CU_NATIVE_HELPER=0 npm test` 用来确认回退路径（127 通过，7 跳过）。
 
 ## 测试文件
 
 | 文件 | 数量 | 覆盖内容 |
 |------|------|----------|
-| `coords.test.ts` | 13 | `targetImageSize` 的长边和 token 双约束（包括 14" MBP 的 1568×1014 陷阱、竖屏）、模型像素 ↔ 逻辑点互逆映射、未截图时坐标直通、`clampRegion` |
+| `coords.test.ts` | 16 | `targetImageSize` 的长边和 token 双约束（包括 14" MBP 的 1568×1014 陷阱、竖屏）、模型像素 ↔ 逻辑点互逆映射、带负原点的副屏、未截图时坐标直通、`clampRegion` |
 | `coords.fullspace.test.ts` | 18 | 内置 Retina、外接 4K HiDPI、非 Retina、截图大于显示器四种显示器，各测 4 项：四个角精确映射、全屏往返误差 ≤ 1pt、单调且不越界、`1/scaleFactor` 公式会明显出错；另有 `clampRegion` 退化/反向矩形和越界坐标行为 |
 | `input.test.ts` | 9 | 键名映射、组合键拆分；**用真实 cliclick 的 `-m test` 模式**校验我们生成的每个参数（含单进程点击 `moveAndClick`）都能被接受，并确认 `kp:cmd`、`kp:a` 会被拒绝 |
 | `policy.test.ts` | 16 | 快捷键黑名单（各种别名写法、`cmd+q+a` 后缀绕过）、默认所有应用可完全交互、严格模式下的应用分级、授权标志 |
 | `policy.truth.test.ts` | 6 | 白名单 × 分级（严格模式）× 动作类型的完整真值表；每种拒绝都返回可区分的错误码；白名单累加而不是覆盖 |
 | `browser.test.ts` | 4 | 浏览器模式：键名映射、组合键拆分、工具列表（去掉桌面专属工具和前台检查说明）、环境变量解析 |
 | `background.test.ts` | 8 | 原生后台模式：虚拟键码映射；用模拟的 Swift 小工具验证授权 / 选定目标 / 后台启动流程，动作后自动截图，以及点击、双击、输入（含换行）、组合键、滚动、拖拽发出的每条底层指令，和快捷键黑名单拦截 |
+| `snap.test.ts` | 11 | 吸附判定：可点击控件不动、容器内吸附到最近控件并内收 2 点、超出半径不吸附、不跨应用、网页/文本/图片不吸附、落点不出屏幕、控件标题过滤、结果文字 |
+| `desktopHelper.test.ts` | 13 | helper 的请求格式与回复解析、分块到达的回复拼接、控件查询失败返回空结果；**真实 helper**：显示器几何、截图和 `zoom` 的尺寸、稳定等待不超时、不存在的显示器报错、畸形请求被拒绝 |
+| `display.test.ts` | 1 | helper 返回的显示器列表转换（保留原点，从 1 编号） |
+| `screen.test.ts` | 5 | 截图按 API 目标尺寸向 helper 请求并带上稳定窗口；`zoom` 优先用 helper 的全分辨率帧，没有时回退到裁剪截图 |
+| `server.test.ts` | 3 | 截图走 helper；显示器消失后丢弃旧几何和截图基准；helper 丢帧后 `zoom` 仍可用 |
+| `click.test.ts` | 13 | 点击全流程（用模拟 helper）：报告控件、吸附并在结果里写明、`CU_CLICK_SNAP=0`、不吸附到非前台应用、查询失败照常点击、按键/次数/修饰键、副屏落点、批处理、移动和拖拽不吸附、未授权应用在任何查询和点击之前被拒绝 |
 | `apps.test.ts` | 11 | 描述中的应用列表过滤：去掉后台组件和守护进程、强制保留 Finder/TextEdit、保留非 ASCII 名称、应用名字符白名单（防提示注入）；`resolveApp` 按名称/bundle ID 精确匹配，不做模糊猜测 |
 
 ## 真机冒烟测试（macOS）
 
-单元测试不覆盖真实的截图和输入。改动 `server.ts`、`input.ts`、`screen.ts`、`scroll.ts` 之后，
+单元测试不发送真实的输入。改动 `server.ts`、`input.ts`、`screen.ts`、`scroll.ts`、`native/desktop.swift` 之后，
 建议在 Mac 上用 Claude Code 按以下步骤验证一遍：
 
 1. **启动**：`node dist/index.js` 不报 preflight 错误（stdin 关闭后会自动退出）。
 2. **授权**：`request_access` 请求 `TextEdit`，返回 `Granted (1): com.apple.TextEdit`。
 3. **截图**：`screenshot` 返回的尺寸说明与图片一致，例如 `1372x891 pixels`。
-4. **点击精度**：打开 TextEdit，点击菜单栏上的一个小目标（例如“格式”菜单），确认点中。
-   偏差通常出现在屏幕右下角，务必测那一侧。
+4. **点击精度**：打开 TextEdit，点击菜单栏上的一个小目标（例如“格式”菜单），确认点中，
+   并且结果里的控件名（`Hit: ...`）与截图上的一致。偏差通常出现在屏幕右下角，务必测那一侧。
+   再故意点在两个工具栏按钮之间的缝隙，结果应报告 `snapped to ...`；设置 `CU_CLICK_SNAP=0` 后不再吸附。
+   接了多块屏时，`switch_display` 到副屏、`screenshot`、`mouse_move` 到截图中心，光标应落在那块屏的中心。
 5. **文本**：`type` 输入单行中英文；授予 `clipboardWrite` 后输入多行文本，确认换行正确、原剪贴板内容已恢复。
 6. **组合键**：`key` `cmd+a`、`cmd+shift+left`；`cmd+q` 在未授予 `systemKeyCombos` 时应被拒绝。
 7. **前台检查**：把未授权的应用切到前台后执行 `left_click`，应返回 `not_granted`。
