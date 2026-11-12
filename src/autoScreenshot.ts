@@ -14,8 +14,20 @@ export const AUTO_SCREENSHOT_ACTIONS: ReadonlySet<string> = new Set([
   'open_application', 'computer_batch',
 ]);
 
-/** Time for the UI to react (menus opening, pages scrolling) before capture. */
+/**
+ * Fixed time for the UI to react (menus opening, pages scrolling) before
+ * capture. Used when nothing can watch the screen: the background modes, and
+ * desktop mode without the desktop helper.
+ */
 export const AUTO_SCREENSHOT_SETTLE_MS = 250;
+
+/**
+ * With the desktop helper the capture itself waits until the screen stops
+ * changing: no sooner than minMs, and no later than maxMs (a blinking cursor
+ * or a video never settles). Usually faster than the fixed wait, and it does
+ * not capture a menu halfway through opening.
+ */
+export const AUTO_SCREENSHOT_SETTLE = { minMs: 80, maxMs: 600 } as const;
 
 export function autoScreenshotEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.CU_AUTO_SCREENSHOT !== '0';

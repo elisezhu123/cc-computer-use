@@ -15,6 +15,8 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 import { API_RESIZE_PARAMS, targetImageSize } from './imageResize.js';
 import type { ScreenshotDims } from './coords.js';
+import type { AttachedDisplay } from './display.js';
+import type { DesktopHelper } from './desktopHelper.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -39,16 +41,56 @@ async function captureRaw(displayIndex: number): Promise<string> {
   return path;
 }
 
+export interface CaptureOptions {
+  /**
+   * Wait for the screen to stop changing before capturing: at least minMs, at
+   * most maxMs. Only the desktop helper can do this; without it the caller
+   * sleeps a fixed time instead (see autoScreenshot.ts).
+   */
+  settle?: { minMs: number; maxMs: number };
+  saveToDiskPath?: string;
+}
+
 /**
- * Capture, then resize to the API's target size so the server-side transcoder
+ * Capture a display at the API's target size, so the server-side transcoder
  * early-returns and the model's pixel space is exactly what we can invert.
  *
+ * With the desktop helper this is one in-process capture already scaled to the
+ * target size. Without it: screencapture to a file, then sharp to resize.
  * Never upscales: targetImageSize returns the input size when it already fits.
  */
 export async function capture(
-  displayIndex: number,
-  saveToDiskPath?: string,
+  display: AttachedDisplay,
+  opts: CaptureOptions = {},
+  helper: DesktopHelper | null = null,
 ): Promise<CapturedScreenshot> {
+  let data: Buffer;
+  let dims: ScreenshotDims;
+
+  if (helper && display.displayId !== undefined) {
+    const g = display.geometry;
+    const [tw, th] = targetImageSize(
+      Math.round(g.logicalWidth * g.scaleFactor),
+      Math.round(g.logicalHeight * g.scaleFactor),
+      API_RESIZE_PARAMS,
+    );
+    data = await helper.shot(display.displayId, tw, th, opts.settle?.minMs ?? 0, opts.settle?.maxMs ?? 0);
+    dims = { targetWidth: tw, targetHeight: th };
+  } else {
+    ({ data, dims } = await captureWithScreencapture(display.index));
+  }
+
+  let savedPath: string | undefined;
+  if (opts.saveToDiskPath) {
+    await writeFile(opts.saveToDiskPath, data);
+    savedPath = opts.saveToDiskPath;
+  }
+  return { data, dims, savedPath };
+}
+
+async function captureWithScreencapture(
+  displayIndex: number,
+): Promise<{ data: Buffer; dims: ScreenshotDims }> {
   const raw = await captureRaw(displayIndex);
   try {
     const image = sharp(raw);
@@ -63,15 +105,7 @@ export async function capture(
     if (tw !== meta.width || th !== meta.height) {
       pipeline = pipeline.resize(tw, th, { fit: 'fill' });
     }
-    const data = await pipeline.png().toBuffer();
-
-    let savedPath: string | undefined;
-    if (saveToDiskPath) {
-      await writeFile(saveToDiskPath, data);
-      savedPath = saveToDiskPath;
-    }
-
-    return { data, dims: { targetWidth: tw, targetHeight: th }, savedPath };
+    return { data: await pipeline.png().toBuffer(), dims: { targetWidth: tw, targetHeight: th } };
   } finally {
     await unlink(raw).catch(() => {});
   }
@@ -81,10 +115,17 @@ export async function capture(
  * Higher-resolution view of a region of the last full screenshot, for reading
  * small text. Read-only: it does NOT change the coordinate basis, which stays
  * the full-screen screenshot. Ported from the official `zoom` tool semantics.
+ *
+ * Given the desktop helper, the crop comes from the full-resolution frame it
+ * kept from that screenshot, so the zoom shows detail the downscaled
+ * screenshot does not have. Otherwise (no helper, the helper restarted and
+ * lost its frame, or a background mode whose screenshots are not the
+ * desktop's) the screenshot itself is cropped and upscaled.
  */
 export async function zoomRegion(
   fullScreenshotPng: Buffer,
   region: readonly [number, number, number, number],
+  helper: DesktopHelper | null = null,
 ): Promise<{ data: Buffer; width: number; height: number }> {
   const [x0, y0, x1, y1] = region;
   const width = x1 - x0;
@@ -93,14 +134,20 @@ export async function zoomRegion(
     throw new Error(`Zoom region must be at least 1x1, got ${width}x${height}.`);
   }
 
-  // Crop first, then upscale to the long-edge cap so text is legible.
-  const cropped = sharp(fullScreenshotPng).extract({ left: x0, top: y0, width, height });
+  // Upscale to the long-edge cap so text is legible.
   const scale = Math.min(
     4,
     Math.max(1, API_RESIZE_PARAMS.maxTargetPx / Math.max(width, height)),
   );
   const outW = Math.round(width * scale);
   const outH = Math.round(height * scale);
+
+  if (helper) {
+    const fromFrame = await helper.zoom(region, outW, outH).catch(() => null);
+    if (fromFrame) return { data: fromFrame, width: outW, height: outH };
+  }
+
+  const cropped = sharp(fullScreenshotPng).extract({ left: x0, top: y0, width, height });
   const data = await cropped.resize(outW, outH, { fit: 'fill' }).png().toBuffer();
   return { data, width: outW, height: outH };
 }

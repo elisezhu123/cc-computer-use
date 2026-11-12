@@ -41,7 +41,13 @@ import {
   filterAppsForDescription,
 } from './apps.js';
 import type { InstalledApp } from './types.js';
-import { autoScreenshotEnabled, withAutoScreenshot } from './autoScreenshot.js';
+import {
+  autoScreenshotEnabled,
+  withAutoScreenshot,
+  AUTO_SCREENSHOT_SETTLE,
+  AUTO_SCREENSHOT_SETTLE_MS,
+} from './autoScreenshot.js';
+import { getDesktopHelper, closeDesktopHelper, type DesktopHelper } from './desktopHelper.js';
 import {
   newSession,
   assertActionAllowed,
@@ -64,6 +70,15 @@ export interface ServerContext {
   installedNames: string[];
   /** Attach a screenshot to screen-changing actions; defaults to CU_AUTO_SCREENSHOT. */
   autoScreenshot?: boolean;
+  /**
+   * The desktop helper to use: null forces the cliclick/screencapture path,
+   * undefined (the default) uses the shared helper when it is available.
+   */
+  helper?: DesktopHelper | null;
+}
+
+async function helperFor(ctx: ServerContext): Promise<DesktopHelper | null> {
+  return ctx.helper === undefined ? getDesktopHelper() : ctx.helper;
 }
 
 function activeDisplay(ctx: ServerContext): AttachedDisplay {
@@ -129,7 +144,11 @@ function errorResult(e: unknown): ToolResult {
 
 // ── Screenshot ───────────────────────────────────────────────────────────────
 
-async function doScreenshot(ctx: ServerContext, saveToDisk: boolean): Promise<ToolResult> {
+async function doScreenshot(
+  ctx: ServerContext,
+  saveToDisk: boolean,
+  settle?: { minMs: number; maxMs: number },
+): Promise<ToolResult> {
   if (ctx.session.allowedBundleIds === null) {
     throw new PolicyError(
       'request_access has not been called yet. Call it before taking screenshots.',
@@ -137,7 +156,25 @@ async function doScreenshot(ctx: ServerContext, saveToDisk: boolean): Promise<To
     );
   }
   const d = activeDisplay(ctx);
-  const shot = await capture(d.index, saveToDisk ? `/tmp/cu-shot-${Date.now()}.png` : undefined);
+  const helper = await helperFor(ctx);
+  let shot;
+  try {
+    shot = await capture(
+      d,
+      { settle, saveToDiskPath: saveToDisk ? `/tmp/cu-shot-${Date.now()}.png` : undefined },
+      helper,
+    );
+  } catch (e) {
+    if (e instanceof Error && /no such display/.test(e.message)) {
+      // A monitor was unplugged or rearranged. The old geometry would send
+      // clicks to the wrong place, so drop it along with the screenshot basis.
+      ctx.displays = await detectDisplays(helper);
+      ctx.activeDisplayIndex = (ctx.displays.find((x) => x.isMain) ?? ctx.displays[0]!).index;
+      ctx.lastScreenshot = null;
+      throw new Error('The display configuration changed. Take a new screenshot before continuing.');
+    }
+    throw e;
+  }
   ctx.lastScreenshot = { png: shot.data, dims: shot.dims };
 
   const others = ctx.displays
@@ -407,7 +444,16 @@ export async function dispatch(
 ): Promise<ToolResult> {
   const result = await dispatchAction(ctx, name, args);
   if (!(ctx.autoScreenshot ?? autoScreenshotEnabled())) return result;
-  return withAutoScreenshot(name, args, result, () => doScreenshot(ctx, false));
+  // The helper waits for the screen to settle as part of the capture; without
+  // it, sleep a fixed time first.
+  const watched = (await helperFor(ctx)) !== null;
+  return withAutoScreenshot(
+    name,
+    args,
+    result,
+    () => doScreenshot(ctx, false, watched ? AUTO_SCREENSHOT_SETTLE : undefined).catch(errorResult),
+    watched ? 0 : AUTO_SCREENSHOT_SETTLE_MS,
+  );
 }
 
 async function dispatchAction(
@@ -491,7 +537,7 @@ async function dispatchAction(
         if (!region || region.length !== 4) throw new Error('zoom requires a region of [x0, y0, x1, y1].');
         if (!ctx.lastScreenshot) throw new Error('Take a screenshot before zooming.');
         const clamped = clampRegion(region, ctx.lastScreenshot.dims);
-        const out = await zoomRegion(ctx.lastScreenshot.png, clamped);
+        const out = await zoomRegion(ctx.lastScreenshot.png, clamped, await helperFor(ctx));
         const note =
           `Zoomed ${clamped[2] - clamped[0]}x${clamped[3] - clamped[1]} of screenshot space ` +
           `(${clamped.join(', ')}) to ${out.width}x${out.height}. ` +
@@ -716,6 +762,7 @@ export async function main(): Promise<void> {
 
   const shutdown = async () => {
     closeScrollHelper();
+    closeDesktopHelper();
     await server.close().catch(() => {});
     process.exit(0);
   };

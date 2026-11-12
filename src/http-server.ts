@@ -30,6 +30,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
 import { createServer, loadEnvironment, type ServerEnvironment } from './server.js';
 import { closeScrollHelper } from './scroll.js';
+import { closeDesktopHelper } from './desktopHelper.js';
 import { PreflightError } from './display.js';
 
 const PORT = Number(process.env.PORT ?? 3100);
@@ -133,6 +134,7 @@ export async function startHttpServer(env: ServerEnvironment): Promise<void> {
 
     const shutdown = async () => {
       closeScrollHelper();
+      closeDesktopHelper();
       await Promise.all([...sessions.keys()].map(closeSession));
       httpServer.close();
       process.exit(0);
