@@ -17,6 +17,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { DisplayGeometry } from './coords.js';
+import { getDesktopHelper, type DesktopHelper, type HelperDisplay } from './desktopHelper.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -27,6 +28,28 @@ export interface AttachedDisplay {
   /** True when this is the display macOS designates as main. */
   isMain: boolean;
   geometry: DisplayGeometry;
+  /** CGDirectDisplayID, present when the geometry came from the desktop helper. */
+  displayId?: number;
+}
+
+/**
+ * Displays as the desktop helper measured them: real origins and scale
+ * factors for every display, main display first.
+ */
+export function displaysFromHelper(list: HelperDisplay[]): AttachedDisplay[] {
+  return list.map((d, i) => ({
+    index: i + 1,
+    name: d.name,
+    isMain: d.isMain,
+    displayId: d.id,
+    geometry: {
+      logicalWidth: d.logicalWidth,
+      logicalHeight: d.logicalHeight,
+      scaleFactor: d.scaleFactor,
+      originX: d.originX,
+      originY: d.originY,
+    },
+  }));
 }
 
 export class PreflightError extends Error {
@@ -83,8 +106,24 @@ async function desktopBounds(): Promise<[number, number, number, number] | null>
  * scaleFactor is derived, not assumed: physical/1 == logical means non-Retina,
  * physical/2 == logical means Retina. We accept a match within 1px to absorb
  * rounding, and reject anything else rather than picking the closest.
+ *
+ * With the desktop helper the geometry is read from CoreGraphics instead,
+ * which also gives each display's origin; the system_profiler path below is
+ * the fallback and knows only the main display's origin (0, 0).
  */
-export async function detectDisplays(): Promise<AttachedDisplay[]> {
+export async function detectDisplays(
+  helper?: DesktopHelper | null,
+): Promise<AttachedDisplay[]> {
+  const h = helper === undefined ? await getDesktopHelper() : helper;
+  if (h) {
+    try {
+      const fromHelper = displaysFromHelper(await h.displays());
+      if (fromHelper.length > 0) return fromHelper;
+    } catch {
+      // Fall through to system_profiler.
+    }
+  }
+
   const { stdout } = await execFileAsync('system_profiler', ['SPDisplaysDataType']);
 
   // Split the output into display blocks. Each starts with an indented
@@ -174,9 +213,15 @@ export async function detectDisplays(): Promise<AttachedDisplay[]> {
  * Called once at startup so failures surface as actionable text rather than
  * as a mystery cliclick error mid-task.
  */
-export async function preflightPermissions(): Promise<void> {
-  // 1. Screen Recording - required for screencapture.
-  const shot = await probePhysicalSize(1);
+export async function preflightPermissions(helper?: DesktopHelper | null): Promise<void> {
+  // 1. Screen Recording - required for any capture.
+  const h = helper === undefined ? await getDesktopHelper() : helper;
+  let shot: unknown = null;
+  if (h) {
+    const main = (await h.displays().catch(() => []))[0];
+    if (main) shot = await h.shot(main.id, 64, 40, 0, 0).catch(() => null);
+  }
+  shot ??= await probePhysicalSize(1);
   if (!shot) {
     throw new PreflightError(
       'Screen Recording permission is not granted - screencapture fails.',

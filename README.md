@@ -51,10 +51,15 @@ AI 可以操作 macOS 上的软件和浏览器，也可以在浏览器里玩回�
 - **点击精准**：截图在本地按 API 算法预先缩放，坐标按实测的显示器几何映射，Retina 屏和多显示器都能正确定位。
 - **速度**：
   - 前台应用检查用 `lsappinfo`，不再发 AppleScript；
-  - 每次点击只启动一次 cliclick；
+  - 截图、点击、显示器几何由一个常驻的 Swift helper 在进程内完成，一个动作加自动截图约 0.3 秒（原来约 0.9 秒）；没有 `swiftc` 或设置 `CU_NATIVE_HELPER=0` 时回退到 cliclick + screencapture；
   - 长文本改为粘贴；
   - `computer_batch` 一次调用执行多步；
   - 点击、输入、按键后自动附上新截图，模型不必再单独截图，每一步少一次来回（`CU_AUTO_SCREENSHOT=0` 关闭）。
+- **精度**：
+  - 点击结果写明点中的控件，点错了当场就知道；
+  - 点击落在两个控件之间的缝隙时，吸附到 6 个截图像素内最近的可点击控件（`CU_CLICK_SNAP=0` 关闭）；
+  - 多显示器：按每块屏的实际原点换算，副屏截图上的点击落在副屏；
+  - `zoom` 从全分辨率画面裁剪，小字清晰。
 - **两种传输**：stdio（默认），以及 Streamable HTTP / SSE（[Gateway](computer-use-mcp-server/GATEWAY.md)）。
 - **安全调用外部命令**：统一使用 `execFile` + argv，不拼接 shell 字符串，输入的文本不会造成命令注入。
 
@@ -247,10 +252,15 @@ See [BACKGROUND.md](BACKGROUND.md) (Chinese) for the background modes and for ru
   so Retina and multi-monitor setups land correctly.
 - **Speed**:
   - the frontmost check uses `lsappinfo` instead of AppleScript;
-  - each click takes a single cliclick process;
+  - capture, clicks and display geometry run in-process in a long-lived Swift helper: an action plus its automatic screenshot takes about 0.3s (was about 0.9s); without `swiftc`, or with `CU_NATIVE_HELPER=0`, it falls back to cliclick + screencapture;
   - long text is pasted;
   - `computer_batch` runs several steps in one call;
   - clicks, typing and keys return a fresh screenshot, so the model needs no separate screenshot call per step (`CU_AUTO_SCREENSHOT=0` turns this off).
+- **Precision**:
+  - a click result names the control that was hit, so a miss is visible immediately;
+  - a click that lands in the gap between two controls snaps to the nearest clickable control within 6 screenshot pixels (`CU_CLICK_SNAP=0` turns this off);
+  - multiple displays: coordinates are mapped against each display's real origin, so a click on a secondary display's screenshot lands on that display;
+  - `zoom` crops the full-resolution frame, so small text is legible.
 - **Two transports**: stdio (default), and Streamable HTTP / SSE ([gateway](computer-use-mcp-server/GATEWAY.md)).
 - **Safe process calls**: everything goes through `execFile` with an argv array, never a shell string, so typed text cannot inject commands.
 

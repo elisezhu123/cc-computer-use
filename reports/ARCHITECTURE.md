@@ -11,16 +11,24 @@ computer-use MCP 服务器（`@ant/computer-use-mcp`）。
 模型在官方环境里学会的用法（先 `request_access`，再 `screenshot`，按截图像素点击，
 用 `computer_batch` 合并可预测的操作）在这里原样成立。
 
-底层实现换成了可以独立部署的 macOS 命令行工具：
+底层实现换成了可以独立部署的 macOS 命令行工具，外加一个首次使用时编译的 Swift helper（`native/desktop.swift`）。
+helper 可用时走“helper”一列，不可用（没有 `swiftc`、`CU_NATIVE_HELPER=0`、连续崩溃两次）时走“回退”一列，行为与没有 helper 时完全一致：
+
+| 能力 | 官方实现 | helper | 回退 |
+|------|----------|--------|------|
+| 鼠标 | Rust 原生模块（enigo） | CGEvent（`desktopHelper.ts`） | [`cliclick`](https://github.com/BlueM/cliclick)（`input.ts`） |
+| 键盘、文本 | 同上 | — | `cliclick` |
+| 滚动 | 原生模块 | — | Swift CGEvent helper（`scroll.ts` + `native/scroll.swift`） |
+| 截图、`zoom` | 原生截屏 | ScreenCaptureKit，进程内缩放和编码 | `screencapture` + `sharp`（`screen.ts`） |
+| 显示器几何 | 原生 | CoreGraphics 实测每块屏的原点和缩放 | `system_profiler` + 实测截图尺寸（`display.ts`） |
+| 点击落点的控件 | — | 辅助功能 hit test（`snap.ts` 决定是否吸附） | 无 |
+
+不分 helper / 回退的部分：
 
 | 能力 | 官方实现 | 本项目 |
 |------|----------|--------|
-| 鼠标 / 键盘输入 | Rust 原生模块（enigo） | [`cliclick`](https://github.com/BlueM/cliclick)（`input.ts`） |
-| 滚动、中键点击 | 原生模块 | 首次使用时编译的 Swift CGEvent helper（`scroll.ts` + `native/scroll.swift`） |
-| 截图 | 原生截屏 | `screencapture` + `sharp` 缩放（`screen.ts`） |
 | 剪贴板 | 原生 | `pbcopy` / `pbpaste`（`clipboard.ts`） |
 | 应用枚举 / 前台应用 / 激活 | 原生 | `mdfind -attr`、`lsappinfo`、`osascript`（`apps.ts`） |
-| 显示器几何 | 原生 | `system_profiler` + 实测截图尺寸（`display.ts`） |
 | 权限策略 | 白名单、分级、快捷键黑名单 | 同样的概念，独立实现（`policy.ts`） |
 
 ## 模块
@@ -36,12 +44,15 @@ src/
 ├── imageResize.ts    API 图像缩放算法的移植（决定截图尺寸）
 ├── screen.ts         截图与 zoom
 ├── display.ts        显示器检测、启动预检（权限 / cliclick）
-├── input.ts          cliclick 封装：鼠标、按键、文本
-├── scroll.ts         Swift helper 进程管理：滚动、中键
+├── input.ts          输入：鼠标（helper 或 cliclick）、按键、文本（cliclick）
+├── desktopHelper.ts  native/desktop.swift 的类型化封装；不可用时返回 null
+├── snap.ts           点击落点判定：报告点中的控件，落在缝隙时吸附（纯函数）
+├── scroll.ts         Swift helper 进程管理：滚动、中键（回退）
 ├── clipboard.ts      剪贴板读写与“粘贴后恢复”
 ├── apps.ts           已安装应用枚举、前台应用、激活、描述过滤
 ├── types.ts          共享类型
 ├── native/scroll.swift
+├── native/desktop.swift  桌面 helper：截图、zoom、显示器、鼠标、控件查询
 │
 │   后台模式（见 BACKGROUND.md）
 ├── driverServer.ts   后台模式共用层：坐标换算、zoom、批处理、结果格式
@@ -51,7 +62,7 @@ src/
 ├── background.ts     原生后台模式入口（实验性）
 ├── background-server.ts 原生驱动：CGEventPostToPid + 窗口截图
 ├── nativeKeys.ts     键名 → macOS 虚拟键码与修饰键标志
-├── nativeHelper.ts   background.swift 进程管理
+├── nativeHelper.ts   Swift helper 进程管理（desktop.swift 与 background.swift 共用）
 └── native/background.swift
 ```
 
@@ -67,6 +78,7 @@ MCP 客户端
                       │    └─ assertActionAllowed()     policy.ts
                       ├─ assertChordAllowed()           key / hold_key
                       ├─ toLogical(x, y)                coords.ts
+                      ├─ resolveClick()                 点击：查控件、决定是否吸附（snap.ts）
                       └─ input.* / scrollAt / capture   执行
 ```
 
@@ -92,12 +104,41 @@ MCP 客户端
    模型实际看到的尺寸和我们以为的尺寸不同，点击会系统性偏移。
    `imageResize.ts` 移植了服务端算法，**同时满足长边 ≤ 1568 和 token ≤ 1568 两个约束**。
    只看长边是不够的：14" MBP 上 1568×1014 = 2072 tokens，服务端会再缩到 1372×887，误差约 14%。
-2. **映射公式是 `logical = model × (logicalW / targetW)`**，两个维度分别计算。
+2. **映射公式是 `logical = 原点 + model × (logicalW / targetW)`**，两个维度分别计算。
+   原点是该显示器左上角的全局坐标：主屏是 (0, 0)，放在主屏左边或上方的副屏是负数。
+   漏掉原点，副屏截图上的点击会全部落到主屏。
    不能写成 `1 / scaleFactor`，那样在 14" MBP 上会有约 21% 的偏差。
 3. **只在最后一步取整。** 中间取整会让 Retina 屏上的逻辑点被量化成偶数，导致小目标点不中。
 4. **scaleFactor 靠实测，不靠猜。** `display.ts` 对比实际截图尺寸和逻辑尺寸来推导缩放比；
    推导不出合理值（< 1 或 > 4）就拒绝启动，而不是带着偏差运行。
 5. `zoom` 只是为了看清细节的放大视图，**不改变坐标基准**，之后的点击仍然以全屏截图为准。
+   helper 在每次截图时保留一帧全分辨率画面，`zoom` 从这一帧裁剪，所以能看到缩小后的截图里没有的细节；
+   没有 helper 时退回到裁剪截图本身再放大。
+
+## 点击反馈与吸附
+
+截图被缩到不足屏幕分辨率的一半（16" MBP 上 1 个截图像素约等于 1.26 个逻辑点），模型在密集界面上经常偏几个像素，
+落到两个控件之间的缝隙里。helper 可用时，每次点击前先用辅助功能查询落点（`resolveClick` → `snap.ts`）：
+
+- **点中的是可点击控件**（按钮、复选框、菜单项、链接、输入框等）：不动，结果里写明，例如 `Hit: AXButton "Device".`
+- **点中的是纯容器**（窗口、分组、工具栏、滚动区）且 6 个截图像素内有可点击控件：落点移到该控件上，结果里写明
+  `snapped to (424, 38), nearest control AXButton "Device".`
+- **其他情况**（文本、图片、画布、查询失败或超时）：不动。这些地方的精确位置本身有意义。
+- **网页和 Electron 界面里一律不吸附。** 那里可点击的 `<div>`（列表行、标签页、卡片）报告的角色就是 `AXGroup`，
+  当成“缝隙”会把点击挪到旁边的小按钮（关闭、删除）上。helper 沿父链找到 `AXWebArea` 就标记 `inWeb`。
+
+约束：
+
+- 只吸附到**前台应用**自己的控件。前台应用检查在 `guard()` 里做，吸附不能把点击移到没检查过的应用上。
+- 控件的标题和角色都来自屏幕上的应用或网页（包括没有授权的应用），会进入模型读到的结果：
+  标题和应用名一样先截断（60 字符）再按字符白名单过滤，角色不像 `AXSomething` 的一律改成 `AXUnknown`。
+- 拖拽、`mouse_move`、`left_mouse_down/up` 不吸附。
+
+带修饰键的点击（`left_click` 的 `text: "shift"` 等）在点击前后发真实的修饰键按下和抬起，鼠标事件上的标志位始终显式设置。
+只设标志位不发按键事件，会让修饰键在点击之后一直处于按下状态。
+
+没有 helper 时不知道副屏的原点，副屏截图上的坐标动作会直接报错，而不是点到主屏上。
+- `CU_CLICK_SNAP=0` 关闭吸附，只保留报告。
 
 ## 权限模型
 
@@ -200,7 +241,36 @@ helper 会回复 `ok` / `err`，静默失败会被报告为工具错误。
 
 ## 性能
 
-前台应用检查在**每个动作前**都会执行（批处理中每一步各一次），是单次操作延迟的主要来源，因此：
+16" MBP（3456×2234）上用 `node scripts/bench.mjs` 实测的中位数：
+
+| 动作 | helper | 回退 |
+|------|--------|------|
+| `screenshot` | 约 150ms | 约 500ms |
+| 鼠标移动 | 约 55ms | 约 135ms |
+| 一个动作 + 自动截图 | 约 300ms | 约 880ms |
+
+“一个动作”测的是鼠标移动，画面不变，所以稳定等待最短。真实点击实测约 560–800ms（回退路径约 1260–1430ms）：
+点击后界面有焦点环、光标闪烁等变化，等待画面稳定的时间更长（上限 600ms），另加控件查询（原生应用里几毫秒，
+菜单栏和部分 Electron 应用里可达 100ms 以上，上限 300ms）。
+
+helper 省掉的是：每次点击启动一次 `cliclick`；`screencapture` 把全分辨率 PNG 写到磁盘再由 `sharp` 解码、缩放、重新编码；
+以及截图前固定的 250ms 等待。helper 的截图循环连续取帧，两帧基本一致（且已过 80ms）就返回最后一帧，最多等 600ms，
+所以既不会多等，也不会截到菜单展开到一半的画面。
+
+**显示器变化。** helper 每次截图的回复都带上该显示器当时的原点、尺寸和缩放；与服务器记录的不一致（拔掉、重排、合盖后主屏切换、改分辨率）
+就抛 `DisplayChangedError`：重新探测显示器、丢弃截图基准，并且在下一次截图之前拒绝所有带坐标的动作。
+动作后的自动截图遇到这种情况时，动作结果里会写明原因。
+
+**`zoom` 的帧编号。** helper 只保留最近一帧全分辨率画面，而它被服务器的所有会话共用（HTTP 网关下可以有多个）。
+每次截图回复一个帧编号，`zoom` 带上编号；编号对不上（别的会话又截了图、helper 重启过、或这张截图是回退路径截的）就裁剪截图本身。
+
+**helper 出错时。** 请求超时会重启 helper，排在后面的请求在新进程上执行；进程级失败连续两次后本次运行不再使用 helper。
+helper 截图失败（非显示器变化）时，当次截图改走 `screencapture`。
+
+**前台应用检查不走 helper。** `NSWorkspace.frontmostApplication` 在 helper 进程里会滞后甚至不更新
+（实测切换应用 400ms 后仍是上一个应用），而这个值决定每个输入动作是否放行，所以仍然用 `lsappinfo`（约 15ms）。
+
+其余：
 
 - 前台应用用 `lsappinfo front` + `lsappinfo info -only bundleid` 直接查询 LaunchServices，比 `osascript` 向 System Events 发 Apple Event 快得多，也不需要“自动化”权限；只有 `lsappinfo` 失败时才回退到 `osascript`。
 - 点击的移动、稳定等待、点击在一次 cliclick 调用中完成。
@@ -249,7 +319,10 @@ HTTP 模式下每个客户端会话有独立的会话状态；默认只监听 `1
 
 | 常量 | 值 | 位置 | 作用 |
 |------|----|------|------|
-| `MOVE_SETTLE_MS` | 50ms | `input.ts` | 移动后、点击前的稳定时间 |
+| `MOVE_SETTLE_MS` | 50ms | `input.ts`、`desktop.swift` | 移动后、点击前的稳定时间 |
+| 自动截图稳定窗口 | 80–600ms | `autoScreenshot.ts` | helper：画面稳定即截；回退：固定 250ms |
+| 吸附半径 | 6 截图像素 | `server.ts` | 缝隙里的点击可以被移动的最大距离 |
+| 辅助功能超时 | 150ms | `desktop.swift` | 应用无响应时放弃查询，点击照常 |
 | 按键重复间隔 | 8ms | `input.ts` `pressChord` | 与 125Hz USB 轮询对齐 |
 | 粘贴后等待 | 100ms | `clipboard.ts` | 应用读取剪贴板后再恢复 |
 

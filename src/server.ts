@@ -30,8 +30,9 @@ import {
   type ScreenshotDims,
 } from './coords.js';
 import * as input from './input.js';
-import { scrollAt, middleClick, closeScrollHelper } from './scroll.js';
-import { capture, zoomRegion } from './screen.js';
+import { scrollAt, closeScrollHelper } from './scroll.js';
+import { chooseClickPoint, describeHit, snapEnabled } from './snap.js';
+import { capture, zoomRegion, DisplayChangedError } from './screen.js';
 import { pasteText, readClipboard, writeClipboard } from './clipboard.js';
 import {
   listInstalledApps,
@@ -41,7 +42,13 @@ import {
   filterAppsForDescription,
 } from './apps.js';
 import type { InstalledApp } from './types.js';
-import { autoScreenshotEnabled, withAutoScreenshot } from './autoScreenshot.js';
+import {
+  autoScreenshotEnabled,
+  withAutoScreenshot,
+  AUTO_SCREENSHOT_SETTLE,
+  AUTO_SCREENSHOT_SETTLE_MS,
+} from './autoScreenshot.js';
+import { getDesktopHelper, closeDesktopHelper, type DesktopHelper } from './desktopHelper.js';
 import {
   newSession,
   assertActionAllowed,
@@ -59,11 +66,28 @@ export interface ServerContext {
   activeDisplayIndex: number;
   session: SessionState;
   /** Pixel space of the last full screenshot - the basis for ALL coordinates. */
-  lastScreenshot: { png: Buffer; dims: ScreenshotDims } | null;
+  lastScreenshot: { png: Buffer; dims: ScreenshotDims; frameId?: number } | null;
+  /**
+   * Set when the display configuration changed under the last screenshot.
+   * Coordinates are refused until a new screenshot replaces it: without a
+   * basis they would be used as raw points on whatever display is now main.
+   */
+  basisStale?: boolean;
   installed: InstalledApp[];
   installedNames: string[];
   /** Attach a screenshot to screen-changing actions; defaults to CU_AUTO_SCREENSHOT. */
   autoScreenshot?: boolean;
+  /**
+   * The desktop helper to use: null forces the cliclick/screencapture path,
+   * undefined (the default) uses the shared helper when it is available.
+   */
+  helper?: DesktopHelper | null;
+  /** The frontmost app's bundle ID; defaults to asking LaunchServices. Injected by tests. */
+  frontmost?: () => Promise<string | null>;
+}
+
+async function helperFor(ctx: ServerContext): Promise<DesktopHelper | null> {
+  return ctx.helper === undefined ? getDesktopHelper() : ctx.helper;
 }
 
 function activeDisplay(ctx: ServerContext): AttachedDisplay {
@@ -73,8 +97,21 @@ function activeDisplay(ctx: ServerContext): AttachedDisplay {
 }
 
 /** Map model-space coords to cliclick logical points against the last screenshot. */
-function toLogical(ctx: ServerContext, x: number, y: number): { x: number; y: number } {
+export function toLogical(ctx: ServerContext, x: number, y: number): { x: number; y: number } {
+  if (ctx.basisStale) {
+    throw new Error(
+      'The display configuration changed since the last screenshot. Take a new screenshot before using coordinates.',
+    );
+  }
   const d = activeDisplay(ctx);
+  if (!d.isMain && d.geometry.originX === undefined) {
+    // Geometry from system_profiler (no desktop helper) has no origin. Mapping
+    // with (0, 0) would put this click on the main display instead.
+    throw new Error(
+      `Coordinates on the secondary display "${d.name}" need the desktop helper, which is not available ` +
+        '(CU_NATIVE_HELPER=0, or it could not be compiled). Use switch_display to return to the main display.',
+    );
+  }
   return modelToLogical(x, y, ctx.lastScreenshot?.dims ?? null, d.geometry);
 }
 
@@ -82,9 +119,57 @@ function toLogical(ctx: ServerContext, x: number, y: number): { x: number; y: nu
 async function guard(
   ctx: ServerContext,
   kind: 'read' | 'click' | 'type' | 'key' | 'scroll' | 'clipboard_read' | 'clipboard_write',
-): Promise<void> {
-  const frontmost = await getFrontmostBundleId();
+): Promise<string | null> {
+  const frontmost = await (ctx.frontmost ?? getFrontmostBundleId)();
   assertActionAllowed(ctx.session, frontmost, kind);
+  return frontmost;
+}
+
+/** How far, in screenshot pixels, a click may be moved onto a nearby control. */
+const SNAP_RADIUS_PX = 6;
+
+/**
+ * Turn a screenshot coordinate into the point to click, using Accessibility
+ * to see what is there. A point in the gap next to a control moves onto the
+ * control (see snap.ts); either way `note` says what was hit, so the model
+ * learns of a miss from this result instead of from the next screenshot.
+ *
+ * Without the helper, or when the lookup returns nothing, the point is used
+ * as given and the note is empty.
+ */
+export async function resolveClick(
+  ctx: ServerContext,
+  model: readonly [number, number],
+  helper: DesktopHelper | null,
+  frontmostBundleId: string | null,
+): Promise<{ point: { x: number; y: number }; note: string; snappedTo: { x: number; y: number } | null }> {
+  const d = activeDisplay(ctx);
+  const dims = ctx.lastScreenshot?.dims ?? null;
+  const point = toLogical(ctx, model[0], model[1]);
+  if (!helper) return { point, note: '', snappedTo: null };
+
+  const g = d.geometry;
+  const radius = dims ? (SNAP_RADIUS_PX * g.logicalWidth) / dims.targetWidth : SNAP_RADIUS_PX;
+  const hit = await helper.hit(point.x, point.y, radius);
+  const choice = chooseClickPoint(point, hit, {
+    frontmostBundleId,
+    radius,
+    enabled: snapEnabled(),
+    bounds: { x: g.originX ?? 0, y: g.originY ?? 0, w: g.logicalWidth, h: g.logicalHeight },
+  });
+  return {
+    point: choice.point,
+    note: describeHit(choice),
+    snappedTo: choice.snapped ? logicalToModel(choice.point.x, choice.point.y, dims, g) : null,
+  };
+}
+
+/** The sentence after "Clicked ... at screenshot (x, y)" in a click result. */
+function clickOutcome(r: Awaited<ReturnType<typeof resolveClick>>): string {
+  if (r.snappedTo) {
+    return `: snapped to (${r.snappedTo.x}, ${r.snappedTo.y}), ${r.note.replace(/^snapped to /, '')}`;
+  }
+  return ` = logical (${r.point.x}, ${r.point.y}).${r.note ? ` ${r.note}` : ''}`;
 }
 
 /** MCP content blocks we emit. Typed explicitly so a mixed text+image result
@@ -129,7 +214,11 @@ function errorResult(e: unknown): ToolResult {
 
 // ── Screenshot ───────────────────────────────────────────────────────────────
 
-async function doScreenshot(ctx: ServerContext, saveToDisk: boolean): Promise<ToolResult> {
+async function doScreenshot(
+  ctx: ServerContext,
+  saveToDisk: boolean,
+  settle?: { minMs: number; maxMs: number },
+): Promise<ToolResult> {
   if (ctx.session.allowedBundleIds === null) {
     throw new PolicyError(
       'request_access has not been called yet. Call it before taking screenshots.',
@@ -137,8 +226,28 @@ async function doScreenshot(ctx: ServerContext, saveToDisk: boolean): Promise<To
     );
   }
   const d = activeDisplay(ctx);
-  const shot = await capture(d.index, saveToDisk ? `/tmp/cu-shot-${Date.now()}.png` : undefined);
-  ctx.lastScreenshot = { png: shot.data, dims: shot.dims };
+  const helper = await helperFor(ctx);
+  let shot;
+  try {
+    shot = await capture(
+      d,
+      { settle, saveToDiskPath: saveToDisk ? `/tmp/cu-shot-${Date.now()}.png` : undefined },
+      helper,
+    );
+  } catch (e) {
+    if (e instanceof DisplayChangedError) {
+      // A monitor was unplugged, rearranged, or changed resolution. The old
+      // geometry would send clicks to the wrong place, so drop it along with
+      // the screenshot basis.
+      ctx.displays = await detectDisplays(helper);
+      ctx.activeDisplayIndex = (ctx.displays.find((x) => x.isMain) ?? ctx.displays[0]!).index;
+      ctx.lastScreenshot = null;
+      ctx.basisStale = true;
+    }
+    throw e;
+  }
+  ctx.lastScreenshot = { png: shot.data, dims: shot.dims, frameId: shot.frameId };
+  ctx.basisStale = false;
 
   const others = ctx.displays
     .filter((x) => x.index !== d.index)
@@ -163,28 +272,21 @@ async function doClick(
   coord: number[],
   modifiers: string,
 ): Promise<ToolResult> {
-  await guard(ctx, 'click');
+  const frontmost = await guard(ctx, 'click');
   const mods = modifiers ? input.chordModifiers(modifiers) : [];
-
-  if (button === 'middle') {
-    // cliclick has no middle-click token; the Swift helper synthesizes a
-    // button-2 event instead.
-    if (mods.length > 0) {
-      throw new PolicyError(
-        'Modifiers are not supported with middle_click. Use left_click with modifiers instead.',
-        'bad_request',
-      );
-    }
-    const p = toLogical(ctx, coord[0]!, coord[1]!);
-    await middleClick(p.x, p.y, count);
-    return text(`Middle-clicked${count > 1 ? ` x${count}` : ''} at screenshot (${coord[0]}, ${coord[1]}).`);
+  if (button === 'middle' && mods.length > 0) {
+    throw new PolicyError(
+      'Modifiers are not supported with middle_click. Use left_click with modifiers instead.',
+      'bad_request',
+    );
   }
 
-  const p = toLogical(ctx, coord[0]!, coord[1]!);
-  await input.moveAndClick(p.x, p.y, button, count, mods);
+  const helper = await helperFor(ctx);
+  const r = await resolveClick(ctx, [coord[0]!, coord[1]!], helper, frontmost);
+  await input.moveAndClick(r.point.x, r.point.y, button, count, mods, helper);
+  const what = button === 'middle' ? 'Middle-clicked' : `Clicked ${button}`;
   return text(
-    `Clicked ${button}${count > 1 ? ` x${count}` : ''} at screenshot (${coord[0]}, ${coord[1]}) ` +
-      `= logical (${p.x}, ${p.y}).`,
+    `${what}${count > 1 ? ` x${count}` : ''} at screenshot (${coord[0]}, ${coord[1]})${clickOutcome(r)}`,
   );
 }
 
@@ -270,24 +372,28 @@ async function doBatch(
         case 'triple_click': {
           const button = action === 'right_click' ? 'right' : 'left';
           const count = action === 'double_click' ? 2 : action === 'triple_click' ? 3 : 1;
-          await guard(ctx, 'click');
+          const frontmost = await guard(ctx, 'click');
           if (!coord) throw new Error(`${action} requires a coordinate.`);
-          const p = toLogical(ctx, coord[0]!, coord[1]!);
+          const helper = await helperFor(ctx);
+          const r = await resolveClick(ctx, [coord[0]!, coord[1]!], helper, frontmost);
           await input.moveAndClick(
-            p.x,
-            p.y,
+            r.point.x,
+            r.point.y,
             button,
             count as 1 | 2 | 3,
             a.text ? input.chordModifiers(String(a.text)) : [],
+            helper,
           );
-          line = `${action} at (${coord.join(', ')})`;
+          line =
+            `${action} at (${coord.join(', ')})` +
+            (r.snappedTo ? clickOutcome(r) : r.note ? `: ${r.note}` : '');
           break;
         }
         case 'mouse_move': {
           await guard(ctx, 'click');
           if (!coord) throw new Error('mouse_move requires a coordinate.');
           const p = toLogical(ctx, coord[0]!, coord[1]!);
-          await input.moveMouse(p.x, p.y);
+          await input.moveMouse(p.x, p.y, await helperFor(ctx));
           line = `mouse_move to (${coord.join(', ')})`;
           break;
         }
@@ -297,7 +403,7 @@ async function doBatch(
           const start = a.start_coordinate as number[] | undefined;
           const to = toLogical(ctx, coord[0]!, coord[1]!);
           const from = start ? toLogical(ctx, start[0]!, start[1]!) : null;
-          await input.drag(from, to);
+          await input.drag(from, to, await helperFor(ctx));
           line = `left_click_drag to (${coord.join(', ')})`;
           break;
         }
@@ -340,19 +446,19 @@ async function doBatch(
           break;
         }
         case 'cursor_position': {
-          const p = await input.getMousePosition();
+          const p = await input.getMousePosition(await helperFor(ctx));
           line = `cursor_position (${p.x}, ${p.y}) logical`;
           break;
         }
         case 'left_mouse_down': {
           await guard(ctx, 'click');
-          await input.mouseDown();
+          await input.mouseDown(await helperFor(ctx));
           line = 'left_mouse_down';
           break;
         }
         case 'left_mouse_up': {
           await guard(ctx, 'click');
-          await input.mouseUp();
+          await input.mouseUp(await helperFor(ctx));
           line = 'left_mouse_up';
           break;
         }
@@ -407,7 +513,27 @@ export async function dispatch(
 ): Promise<ToolResult> {
   const result = await dispatchAction(ctx, name, args);
   if (!(ctx.autoScreenshot ?? autoScreenshotEnabled())) return result;
-  return withAutoScreenshot(name, args, result, () => doScreenshot(ctx, false));
+  // The helper waits for the screen to settle as part of the capture; without
+  // it, sleep a fixed time first.
+  const watched = (await helperFor(ctx)) !== null;
+  let displayChanged: string | null = null;
+  const out = await withAutoScreenshot(
+    name,
+    args,
+    result,
+    () =>
+      doScreenshot(ctx, false, watched ? AUTO_SCREENSHOT_SETTLE : undefined).catch((e) => {
+        if (e instanceof DisplayChangedError) displayChanged = e.message;
+        return errorResult(e);
+      }),
+    watched ? 0 : AUTO_SCREENSHOT_SETTLE_MS,
+  );
+  // The action happened, but its screenshot did not: say why, or the model
+  // carries on with coordinates from a screen that no longer exists.
+  if (displayChanged) {
+    return { ...out, content: [...out.content, { type: 'text', text: `No screenshot after the action: ${displayChanged}` }] };
+  }
+  return out;
 }
 
 async function dispatchAction(
@@ -491,7 +617,12 @@ async function dispatchAction(
         if (!region || region.length !== 4) throw new Error('zoom requires a region of [x0, y0, x1, y1].');
         if (!ctx.lastScreenshot) throw new Error('Take a screenshot before zooming.');
         const clamped = clampRegion(region, ctx.lastScreenshot.dims);
-        const out = await zoomRegion(ctx.lastScreenshot.png, clamped);
+        const out = await zoomRegion(
+          ctx.lastScreenshot.png,
+          clamped,
+          await helperFor(ctx),
+          ctx.lastScreenshot.frameId,
+        );
         const note =
           `Zoomed ${clamped[2] - clamped[0]}x${clamped[3] - clamped[1]} of screenshot space ` +
           `(${clamped.join(', ')}) to ${out.width}x${out.height}. ` +
@@ -526,7 +657,7 @@ async function dispatchAction(
       }
 
       case 'cursor_position': {
-        const p = await input.getMousePosition();
+        const p = await input.getMousePosition(await helperFor(ctx));
         const d = activeDisplay(ctx);
         const inModel = logicalToModel(p.x, p.y, ctx.lastScreenshot?.dims ?? null, d.geometry);
         return text(
@@ -546,7 +677,7 @@ async function dispatchAction(
         await guard(ctx, 'click');
         const c = reqCoord(args);
         const p = toLogical(ctx, c[0]!, c[1]!);
-        await input.moveMouse(p.x, p.y);
+        await input.moveMouse(p.x, p.y, await helperFor(ctx));
         return text(`Moved to screenshot (${c[0]}, ${c[1]}) = logical (${p.x}, ${p.y}).`);
       }
 
@@ -556,12 +687,12 @@ async function dispatchAction(
         const start = args.start_coordinate as number[] | undefined;
         const to = toLogical(ctx, c[0]!, c[1]!);
         const from = start ? toLogical(ctx, start[0]!, start[1]!) : null;
-        await input.drag(from, to);
+        await input.drag(from, to, await helperFor(ctx));
         return text(`Dragged ${from ? `from logical (${from.x}, ${from.y}) ` : ''}to logical (${to.x}, ${to.y}).`);
       }
 
-      case 'left_mouse_down': await guard(ctx, 'click'); await input.mouseDown(); return text('Left button is down.');
-      case 'left_mouse_up': await guard(ctx, 'click'); await input.mouseUp(); return text('Left button is up.');
+      case 'left_mouse_down': await guard(ctx, 'click'); await input.mouseDown(await helperFor(ctx)); return text('Left button is down.');
+      case 'left_mouse_up': await guard(ctx, 'click'); await input.mouseUp(await helperFor(ctx)); return text('Left button is up.');
 
       case 'type': return await doType(ctx, String(args.text ?? ''));
 
@@ -716,6 +847,7 @@ export async function main(): Promise<void> {
 
   const shutdown = async () => {
     closeScrollHelper();
+    closeDesktopHelper();
     await server.close().catch(() => {});
     process.exit(0);
   };
