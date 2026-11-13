@@ -49,6 +49,15 @@ test('web content, static text and images are never snapped away from', () => {
   }
 });
 
+test('a gap inside web content never snaps, whatever role the page gives it', () => {
+  // Web and Electron UIs report plain <div>s as AXGroup; a click on a list row
+  // must not be moved onto the small button next to it.
+  const row = { ...el('AXGroup', TOOLBAR.frame), inWeb: true };
+  const c = chooseClickPoint({ x: 125, y: 40 }, { at: row, nearby: [BUTTON] }, opts);
+  assert.deepEqual(c.point, { x: 125, y: 40 });
+  assert.equal(c.snapped, false);
+});
+
 test('disabled, or no hit information: the point is unchanged', () => {
   assert.equal(
     chooseClickPoint({ x: 125, y: 40 }, { at: TOOLBAR, nearby: [BUTTON] }, { ...opts, enabled: false }).snapped,

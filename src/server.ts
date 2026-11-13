@@ -32,7 +32,7 @@ import {
 import * as input from './input.js';
 import { scrollAt, closeScrollHelper } from './scroll.js';
 import { chooseClickPoint, describeHit, snapEnabled } from './snap.js';
-import { capture, zoomRegion } from './screen.js';
+import { capture, zoomRegion, DisplayChangedError } from './screen.js';
 import { pasteText, readClipboard, writeClipboard } from './clipboard.js';
 import {
   listInstalledApps,
@@ -66,7 +66,13 @@ export interface ServerContext {
   activeDisplayIndex: number;
   session: SessionState;
   /** Pixel space of the last full screenshot - the basis for ALL coordinates. */
-  lastScreenshot: { png: Buffer; dims: ScreenshotDims } | null;
+  lastScreenshot: { png: Buffer; dims: ScreenshotDims; frameId?: number } | null;
+  /**
+   * Set when the display configuration changed under the last screenshot.
+   * Coordinates are refused until a new screenshot replaces it: without a
+   * basis they would be used as raw points on whatever display is now main.
+   */
+  basisStale?: boolean;
   installed: InstalledApp[];
   installedNames: string[];
   /** Attach a screenshot to screen-changing actions; defaults to CU_AUTO_SCREENSHOT. */
@@ -92,6 +98,11 @@ function activeDisplay(ctx: ServerContext): AttachedDisplay {
 
 /** Map model-space coords to cliclick logical points against the last screenshot. */
 function toLogical(ctx: ServerContext, x: number, y: number): { x: number; y: number } {
+  if (ctx.basisStale) {
+    throw new Error(
+      'The display configuration changed since the last screenshot. Take a new screenshot before using coordinates.',
+    );
+  }
   const d = activeDisplay(ctx);
   return modelToLogical(x, y, ctx.lastScreenshot?.dims ?? null, d.geometry);
 }
@@ -216,17 +227,19 @@ async function doScreenshot(
       helper,
     );
   } catch (e) {
-    if (e instanceof Error && /no such display/.test(e.message)) {
-      // A monitor was unplugged or rearranged. The old geometry would send
-      // clicks to the wrong place, so drop it along with the screenshot basis.
+    if (e instanceof DisplayChangedError) {
+      // A monitor was unplugged, rearranged, or changed resolution. The old
+      // geometry would send clicks to the wrong place, so drop it along with
+      // the screenshot basis.
       ctx.displays = await detectDisplays(helper);
       ctx.activeDisplayIndex = (ctx.displays.find((x) => x.isMain) ?? ctx.displays[0]!).index;
       ctx.lastScreenshot = null;
-      throw new Error('The display configuration changed. Take a new screenshot before continuing.');
+      ctx.basisStale = true;
     }
     throw e;
   }
-  ctx.lastScreenshot = { png: shot.data, dims: shot.dims };
+  ctx.lastScreenshot = { png: shot.data, dims: shot.dims, frameId: shot.frameId };
+  ctx.basisStale = false;
 
   const others = ctx.displays
     .filter((x) => x.index !== d.index)
@@ -495,13 +508,24 @@ export async function dispatch(
   // The helper waits for the screen to settle as part of the capture; without
   // it, sleep a fixed time first.
   const watched = (await helperFor(ctx)) !== null;
-  return withAutoScreenshot(
+  let displayChanged: string | null = null;
+  const out = await withAutoScreenshot(
     name,
     args,
     result,
-    () => doScreenshot(ctx, false, watched ? AUTO_SCREENSHOT_SETTLE : undefined).catch(errorResult),
+    () =>
+      doScreenshot(ctx, false, watched ? AUTO_SCREENSHOT_SETTLE : undefined).catch((e) => {
+        if (e instanceof DisplayChangedError) displayChanged = e.message;
+        return errorResult(e);
+      }),
     watched ? 0 : AUTO_SCREENSHOT_SETTLE_MS,
   );
+  // The action happened, but its screenshot did not: say why, or the model
+  // carries on with coordinates from a screen that no longer exists.
+  if (displayChanged) {
+    return { ...out, content: [...out.content, { type: 'text', text: `No screenshot after the action: ${displayChanged}` }] };
+  }
+  return out;
 }
 
 async function dispatchAction(
@@ -585,7 +609,12 @@ async function dispatchAction(
         if (!region || region.length !== 4) throw new Error('zoom requires a region of [x0, y0, x1, y1].');
         if (!ctx.lastScreenshot) throw new Error('Take a screenshot before zooming.');
         const clamped = clampRegion(region, ctx.lastScreenshot.dims);
-        const out = await zoomRegion(ctx.lastScreenshot.png, clamped, await helperFor(ctx));
+        const out = await zoomRegion(
+          ctx.lastScreenshot.png,
+          clamped,
+          await helperFor(ctx),
+          ctx.lastScreenshot.frameId,
+        );
         const note =
           `Zoomed ${clamped[2] - clamped[0]}x${clamped[3] - clamped[1]} of screenshot space ` +
           `(${clamped.join(', ')}) to ${out.width}x${out.height}. ` +

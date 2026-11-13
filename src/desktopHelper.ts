@@ -25,13 +25,36 @@ export interface HelperDisplay {
   scaleFactor: number;
 }
 
+export interface HelperShot {
+  png: Buffer;
+  /** Names the full-resolution frame the helper kept for zoom. */
+  frameId: number;
+  /** The display's geometry at the moment of capture. */
+  geometry: {
+    originX: number;
+    originY: number;
+    logicalWidth: number;
+    logicalHeight: number;
+    scaleFactor: number;
+  };
+}
+
 export interface DesktopHelper {
   displays(): Promise<HelperDisplay[]>;
   cursor(): Promise<{ x: number; y: number }>;
-  /** PNG of the display at tw x th, taken once the screen settles (0/0: at once). */
-  shot(displayId: number, tw: number, th: number, minMs: number, maxMs: number): Promise<Buffer>;
-  /** Region is in pixels of the last shot. Null when the helper holds no frame. */
-  zoom(region: readonly [number, number, number, number], ow: number, oh: number): Promise<Buffer | null>;
+  /** The display at tw x th, taken once the screen settles (0/0: at once). */
+  shot(displayId: number, tw: number, th: number, minMs: number, maxMs: number): Promise<HelperShot>;
+  /**
+   * Crop of the full-resolution frame behind the shot with this frameId;
+   * region is in that shot's pixels. Null when the helper no longer holds
+   * that frame (it restarted, or a later shot replaced it).
+   */
+  zoom(
+    frameId: number,
+    region: readonly [number, number, number, number],
+    ow: number,
+    oh: number,
+  ): Promise<Buffer | null>;
   /**
    * What Accessibility reports at a point and within `radius` of it. Never
    * throws: a failed or timed-out lookup is an empty result, so a click can
@@ -63,8 +86,28 @@ function pt(x: number, y: number): string {
   return `${Math.round(x)} ${Math.round(y)}`;
 }
 
-function cleanElement(el: HitElement): HitElement {
-  return { ...el, label: sanitizeLabel(String(el.label ?? '')) };
+/**
+ * Everything in a hit element is supplied by whatever app is under the
+ * pointer, including apps the session never granted, and the role and label
+ * end up in tool results the model reads. Roles must look like roles, labels
+ * are sanitized, and an element without a usable frame is dropped.
+ */
+function cleanElement(raw: unknown): HitElement | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const el = raw as Record<string, unknown>;
+  const f = el.frame as Record<string, unknown> | null | undefined;
+  if (typeof f !== 'object' || f === null) return null;
+  const nums = [f.x, f.y, f.w, f.h];
+  if (!nums.every((n) => typeof n === 'number' && Number.isFinite(n))) return null;
+  const role = typeof el.role === 'string' && /^AX[A-Za-z]{1,40}$/.test(el.role) ? el.role : 'AXUnknown';
+  const out: HitElement = {
+    role,
+    label: sanitizeLabel(typeof el.label === 'string' ? el.label : ''),
+    frame: { x: f.x as number, y: f.y as number, w: f.w as number, h: f.h as number },
+    bundleId: typeof el.bundleId === 'string' ? el.bundleId : null,
+  };
+  if (el.inWeb === true) out.inWeb = true;
+  return out;
 }
 
 export function createDesktopHelper(t: HelperTransport): DesktopHelper {
@@ -80,11 +123,24 @@ export function createDesktopHelper(t: HelperTransport): DesktopHelper {
       return { x, y };
     },
     async shot(displayId, tw, th, minMs, maxMs) {
-      return Buffer.from(await t.request(`shot ${displayId} ${tw} ${th} ${minMs} ${maxMs}`), 'base64');
+      const reply = await t.request(`shot ${displayId} ${tw} ${th} ${minMs} ${maxMs}`);
+      const parts = reply.split(' ');
+      const [frameId, originX, originY, logicalWidth, logicalHeight, scaleFactor] = parts.slice(0, 6).map(Number);
+      if (parts.length !== 7 || [frameId, originX, originY, logicalWidth, logicalHeight, scaleFactor].some((n) => !Number.isFinite(n))) {
+        throw new Error('Desktop helper returned an unparseable screenshot reply.');
+      }
+      return {
+        png: Buffer.from(parts[6]!, 'base64'),
+        frameId: frameId!,
+        geometry: {
+          originX: originX!, originY: originY!,
+          logicalWidth: logicalWidth!, logicalHeight: logicalHeight!, scaleFactor: scaleFactor!,
+        },
+      };
     },
-    async zoom(region, ow, oh) {
+    async zoom(frameId, region, ow, oh) {
       try {
-        return Buffer.from(await t.request(`zoom ${region.join(' ')} ${ow} ${oh}`), 'base64');
+        return Buffer.from(await t.request(`zoom ${frameId} ${region.join(' ')} ${ow} ${oh}`), 'base64');
       } catch (e) {
         if (e instanceof Error && /no frame/.test(e.message)) return null;
         throw e;
@@ -92,8 +148,15 @@ export function createDesktopHelper(t: HelperTransport): DesktopHelper {
     },
     async hit(x, y, radius) {
       try {
-        const raw = JSON.parse(await t.request(`hit ${pt(x, y)} ${radius.toFixed(2)}`)) as HitResult;
-        return { at: raw.at ? cleanElement(raw.at) : null, nearby: (raw.nearby ?? []).map(cleanElement) };
+        const raw = JSON.parse(await t.request(`hit ${pt(x, y)} ${radius.toFixed(2)}`)) as {
+          at?: unknown;
+          nearby?: unknown;
+        };
+        const nearby = Array.isArray(raw.nearby) ? raw.nearby : [];
+        return {
+          at: cleanElement(raw.at),
+          nearby: nearby.map(cleanElement).filter((e): e is HitElement => e !== null),
+        };
       } catch {
         return { at: null, nearby: [] };
       }
@@ -121,7 +184,7 @@ export function createDesktopHelper(t: HelperTransport): DesktopHelper {
 
 /** Process-level failures (exit, timeout), as opposed to an "err" reply. */
 function isTransportFailure(e: unknown): boolean {
-  return e instanceof Error && /exited with code|did not respond|Failed to compile|source is missing|EPIPE|ENOENT/.test(e.message);
+  return e instanceof Error && /exited with code|did not respond|could not be started|not accepting input|Failed to compile|source is missing/.test(e.message);
 }
 
 const MAX_CONSECUTIVE_FAILURES = 2;

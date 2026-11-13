@@ -20,6 +20,8 @@ export interface HitElement {
   /** Global logical points. */
   frame: Rect;
   bundleId: string | null;
+  /** Inside a web page or an Electron UI (an AXWebArea is among its ancestors). */
+  inWeb?: boolean;
 }
 
 export interface HitResult {
@@ -103,6 +105,10 @@ export function chooseClickPoint(
 ): ClickChoice {
   const unchanged: ClickChoice = { point, snapped: false, element: hit.at };
   if (!opts.enabled || !hit.at || !CONTAINER_ROLES.has(hit.at.role)) return unchanged;
+  // In web content a clickable <div> (a list row, a tab, a card) reports as a
+  // bare AXGroup. Treating it as a gap would move the click onto the small
+  // button beside it - the close "x", the delete icon.
+  if (hit.at.inWeb) return unchanged;
 
   let best: { el: HitElement; at: { x: number; y: number }; dist: number } | null = null;
   for (const el of hit.nearby) {

@@ -81,12 +81,22 @@ func displaysJSON() -> String {
 
 // ── Capture ──────────────────────────────────────────────────────────────────
 
-var filters: [CGDirectDisplayID: SCContentFilter] = [:]
+/// A display's position, size and scale as one comparable string. A filter
+/// built for one arrangement must not be reused after the display moved or
+/// changed mode.
+func geometrySignature(_ id: CGDirectDisplayID) -> String {
+    let b = CGDisplayBounds(id)
+    return "\(b.origin.x) \(b.origin.y) \(b.width) \(b.height) \(scaleFactor(id))"
+}
 
-/// The capture filter for a display, refreshing the shareable-content list
-/// once if the display is not in the cached set (a monitor was plugged in).
+var filters: [CGDirectDisplayID: (filter: SCContentFilter, signature: String)] = [:]
+
+/// The capture filter for a display. The shareable-content list is queried
+/// again whenever the display is not cached or its geometry changed (a
+/// monitor was plugged in, rearranged, or switched resolution).
 func filter(for id: CGDirectDisplayID) -> SCContentFilter? {
-    if let f = filters[id] { return f }
+    let signature = geometrySignature(id)
+    if let cached = filters[id], cached.signature == signature { return cached.filter }
     let done = DispatchSemaphore(value: 0)
     var found: SCDisplay?
     SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { content, _ in
@@ -96,7 +106,7 @@ func filter(for id: CGDirectDisplayID) -> SCContentFilter? {
     if done.wait(timeout: .now() + 5) == .timedOut { return nil }
     guard let display = found else { return nil }
     let f = SCContentFilter(display: display, excludingWindows: [])
-    filters[id] = f
+    filters[id] = (f, signature)
     return f
 }
 
@@ -183,17 +193,28 @@ func nowMs() -> Double { CFAbsoluteTimeGetCurrent() * 1000 }
 
 /// The last full-resolution frame, kept so `zoom` shows real detail from the
 /// moment of the screenshot rather than an upscaled crop of the small image.
-var retained: (image: CGImage, targetWidth: Int, targetHeight: Int)?
+/// It carries the id its `shot` reply reported: the helper is shared by every
+/// session of the server, so a `zoom` must name the frame it means and gets
+/// "no frame" when a later screenshot has replaced it.
+var retained: (id: Int, image: CGImage, targetWidth: Int, targetHeight: Int)?
+var nextFrameID = 1
 
 /// Capture the display at tw x th. With a settle window (maxMs > 0), frames
 /// are taken until two in a row match and minMs has passed, or until maxMs;
 /// the last frame taken is the one returned, so no extra capture is spent on
 /// the wait. Each frame is captured together with a full-resolution twin,
 /// which is what `zoom` crops.
+///
+/// Reply: "ok <frame id> <originX> <originY> <logicalW> <logicalH> <scale>
+/// <base64 png>". The geometry is the display's as of this capture, so the
+/// server can tell when it has moved or changed mode since it was measured.
 func shot(displayID: CGDirectDisplayID, tw: Int, th: Int, minMs: Double, maxMs: Double) -> String {
-    guard activeDisplayIDs().contains(displayID), let f = filter(for: displayID) else {
+    guard activeDisplayIDs().contains(displayID) else {
         filters[displayID] = nil
         return "err no such display \(displayID)"
+    }
+    guard let f = filter(for: displayID) else {
+        return "err capture unavailable for display \(displayID) - Screen Recording permission may be missing"
     }
     let bounds = CGDisplayBounds(displayID)
     let scale = scaleFactor(displayID)
@@ -231,13 +252,15 @@ func shot(displayID: CGDirectDisplayID, tw: Int, th: Int, minMs: Double, maxMs: 
         filters[displayID] = nil
         return "err capture failed for display \(displayID) - Screen Recording permission may be missing"
     }
-    retained = (result.full, tw, th)
     guard let b64 = pngBase64(result.small) else { return "err could not encode the screenshot" }
-    return "ok \(b64)"
+    let id = nextFrameID
+    nextFrameID += 1
+    retained = (id, result.full, tw, th)
+    return "ok \(id) \(bounds.origin.x) \(bounds.origin.y) \(bounds.width) \(bounds.height) \(scale) \(b64)"
 }
 
-func zoom(x0: Int, y0: Int, x1: Int, y1: Int, ow: Int, oh: Int) -> String {
-    guard let r = retained else { return "err no frame" }
+func zoom(frameID: Int, x0: Int, y0: Int, x1: Int, y1: Int, ow: Int, oh: Int) -> String {
+    guard let r = retained, r.id == frameID else { return "err no frame" }
     let sx = Double(r.image.width) / Double(r.targetWidth)
     let sy = Double(r.image.height) / Double(r.targetHeight)
     let rect = CGRect(
@@ -388,8 +411,23 @@ func element(at p: CGPoint) -> AXUIElement? {
     return leaf
 }
 
+/// Whether an element sits inside web content (a browser page or an Electron
+/// app's UI). There a plain <div> reports as AXGroup, so "the click landed on
+/// a bare container" says nothing about whether it was a miss.
+func isInWebContent(_ el: AXUIElement) -> Bool {
+    var cur = el
+    for _ in 0..<60 {
+        if axString(cur, kAXRoleAttribute) == "AXWebArea" { return true }
+        guard let parent = axParent(cur) else { return false }
+        cur = parent
+    }
+    return false
+}
+
 func describe(_ el: AXUIElement) -> [String: Any]? {
-    guard let role = axString(el, kAXRoleAttribute), let frame = axFrame(el) else { return nil }
+    guard let role = axString(el, kAXRoleAttribute), let frame = axFrame(el),
+          frame.origin.x.isFinite, frame.origin.y.isFinite, frame.width.isFinite, frame.height.isFinite
+    else { return nil }
     let title = axString(el, kAXTitleAttribute) ?? ""
     let label = title.isEmpty ? (axString(el, kAXDescriptionAttribute) ?? "") : title
     return [
@@ -401,17 +439,29 @@ func describe(_ el: AXUIElement) -> [String: Any]? {
     ]
 }
 
+/// Upper bound on one `hit`. Each Accessibility call can take up to its own
+/// timeout against a slow app, and there are many of them; past this the
+/// lookup returns what it has rather than hold up the click.
+let HIT_BUDGET_MS = 300.0
+
 /// The element under `p`, plus the distinct other elements found at 16 probe
-/// points around it (8 directions at half and full radius).
+/// points around it (8 directions at half and full radius). The surroundings
+/// are only probed when they could matter: not when the point is already on a
+/// control, and not inside web content, where clicks are never moved.
 func hitJSON(at p: CGPoint, radius: Double) -> String {
-    guard let centre = element(at: p), let at = describe(centre) else {
+    let start = nowMs()
+    guard let centre = element(at: p), var at = describe(centre) else {
         return jsonString(["at": NSNull(), "nearby": []] as [String: Any])
     }
+    let inWeb = isInWebContent(centre)
+    at["inWeb"] = inWeb
+    let onControl = ACTIONABLE_ROLES.contains(at["role"] as? String ?? "")
     var seen: [AXUIElement] = [centre]
     var nearby: [[String: Any]] = []
-    if radius > 0 {
-        for r in [radius / 2, radius] {
+    if radius > 0 && !inWeb && !onControl {
+        probing: for r in [radius / 2, radius] {
             for k in 0..<8 {
+                if nowMs() - start > HIT_BUDGET_MS { break probing }
                 let a = Double(k) * Double.pi / 4
                 let q = CGPoint(x: p.x + CGFloat(r * cos(a)), y: p.y + CGFloat(r * sin(a)))
                 guard let el = element(at: q), !seen.contains(where: { CFEqual($0, el) }) else { continue }
@@ -445,11 +495,12 @@ func handle(_ line: String) {
         reply(shot(displayID: id, tw: tw, th: th, minMs: minMs, maxMs: maxMs))
 
     case "zoom":
-        guard f.count == 7, let x0 = Int(f[1]), let y0 = Int(f[2]), let x1 = Int(f[3]), let y1 = Int(f[4]),
-              let ow = Int(f[5]), let oh = Int(f[6]), x1 > x0, y1 > y0, ow >= 1, oh >= 1 else {
+        guard f.count == 8, let frameID = Int(f[1]),
+              let x0 = Int(f[2]), let y0 = Int(f[3]), let x1 = Int(f[4]), let y1 = Int(f[5]),
+              let ow = Int(f[6]), let oh = Int(f[7]), x1 > x0, y1 > y0, ow >= 1, oh >= 1 else {
             reply("err bad zoom request: \(line)"); return
         }
-        reply(zoom(x0: x0, y0: y0, x1: x1, y1: y1, ow: ow, oh: oh))
+        reply(zoom(frameID: frameID, x0: x0, y0: y0, x1: x1, y1: y1, ow: ow, oh: oh))
 
     case "hit":
         guard f.count == 4, let x = Double(f[1]), let y = Double(f[2]), let r = Double(f[3]),

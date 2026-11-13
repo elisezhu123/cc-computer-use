@@ -26,7 +26,27 @@ export interface CapturedScreenshot {
   dims: ScreenshotDims;
   /** Where it was written if save_to_disk was set. */
   savedPath?: string;
+  /**
+   * Set when the desktop helper took this screenshot: names the
+   * full-resolution frame it kept, for zoom. Absent for a screencapture frame.
+   */
+  frameId?: number;
 }
+
+/**
+ * The display being captured is gone, or is no longer where or what the
+ * server measured (moved, different resolution or scale). Coordinates mapped
+ * with the old geometry would land in the wrong place, so the caller must
+ * re-detect displays and require a new screenshot.
+ */
+export class DisplayChangedError extends Error {
+  constructor(detail: string) {
+    super(`The display configuration changed (${detail}). Take a new screenshot before continuing.`);
+    this.name = 'DisplayChangedError';
+  }
+}
+
+type ScreencaptureFn = (displayIndex: number) => Promise<{ data: Buffer; dims: ScreenshotDims }>;
 
 async function captureRaw(displayIndex: number): Promise<string> {
   const path = join(tmpdir(), `cu-shot-${process.pid}-${Date.now()}.png`);
@@ -63,9 +83,11 @@ export async function capture(
   display: AttachedDisplay,
   opts: CaptureOptions = {},
   helper: DesktopHelper | null = null,
+  screencapture: ScreencaptureFn = captureWithScreencapture,
 ): Promise<CapturedScreenshot> {
-  let data: Buffer;
-  let dims: ScreenshotDims;
+  let data: Buffer | undefined;
+  let dims: ScreenshotDims | undefined;
+  let frameId: number | undefined;
 
   if (helper && display.displayId !== undefined) {
     const g = display.geometry;
@@ -74,10 +96,32 @@ export async function capture(
       Math.round(g.logicalHeight * g.scaleFactor),
       API_RESIZE_PARAMS,
     );
-    data = await helper.shot(display.displayId, tw, th, opts.settle?.minMs ?? 0, opts.settle?.maxMs ?? 0);
-    dims = { targetWidth: tw, targetHeight: th };
-  } else {
-    ({ data, dims } = await captureWithScreencapture(display.index));
+    let shot;
+    try {
+      shot = await helper.shot(display.displayId, tw, th, opts.settle?.minMs ?? 0, opts.settle?.maxMs ?? 0);
+    } catch (e) {
+      if (e instanceof Error && /no such display/.test(e.message)) {
+        throw new DisplayChangedError(`"${display.name}" is no longer attached`);
+      }
+      // Any other helper failure: this one capture goes through screencapture
+      // instead of failing the tool call.
+    }
+    if (shot) {
+      const now = shot.geometry;
+      const same =
+        Math.abs(now.originX - (g.originX ?? 0)) < 1 &&
+        Math.abs(now.originY - (g.originY ?? 0)) < 1 &&
+        Math.abs(now.logicalWidth - g.logicalWidth) < 1 &&
+        Math.abs(now.logicalHeight - g.logicalHeight) < 1 &&
+        Math.abs(now.scaleFactor - g.scaleFactor) < 0.01;
+      if (!same) throw new DisplayChangedError(`"${display.name}" moved or changed resolution`);
+      data = shot.png;
+      dims = { targetWidth: tw, targetHeight: th };
+      frameId = shot.frameId;
+    }
+  }
+  if (!data || !dims) {
+    ({ data, dims } = await screencapture(display.index));
   }
 
   let savedPath: string | undefined;
@@ -85,7 +129,7 @@ export async function capture(
     await writeFile(opts.saveToDiskPath, data);
     savedPath = opts.saveToDiskPath;
   }
-  return { data, dims, savedPath };
+  return { data, dims, savedPath, frameId };
 }
 
 async function captureWithScreencapture(
@@ -116,8 +160,8 @@ async function captureWithScreencapture(
  * small text. Read-only: it does NOT change the coordinate basis, which stays
  * the full-screen screenshot. Ported from the official `zoom` tool semantics.
  *
- * Given the desktop helper, the crop comes from the full-resolution frame it
- * kept from that screenshot, so the zoom shows detail the downscaled
+ * Given the desktop helper and the id of the frame it kept for that
+ * screenshot, the crop comes from that full-resolution frame, so the zoom shows detail the downscaled
  * screenshot does not have. Otherwise (no helper, the helper restarted and
  * lost its frame, or a background mode whose screenshots are not the
  * desktop's) the screenshot itself is cropped and upscaled.
@@ -126,6 +170,7 @@ export async function zoomRegion(
   fullScreenshotPng: Buffer,
   region: readonly [number, number, number, number],
   helper: DesktopHelper | null = null,
+  frameId?: number,
 ): Promise<{ data: Buffer; width: number; height: number }> {
   const [x0, y0, x1, y1] = region;
   const width = x1 - x0;
@@ -142,8 +187,9 @@ export async function zoomRegion(
   const outW = Math.round(width * scale);
   const outH = Math.round(height * scale);
 
-  if (helper) {
-    const fromFrame = await helper.zoom(region, outW, outH).catch(() => null);
+  // Only a screenshot the helper itself took has a frame there to crop.
+  if (helper && frameId !== undefined) {
+    const fromFrame = await helper.zoom(frameId, region, outW, outH).catch(() => null);
     if (fromFrame) return { data: fromFrame, width: outW, height: outH };
   }
 

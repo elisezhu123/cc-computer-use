@@ -28,9 +28,14 @@ export interface NativeHelperOptions {
   binPrefix: string;
   /** Name used in error messages and the stderr prefix. */
   label: string;
+  /** Run this argv instead of compiling `source`. For tests. */
+  command?: string[];
+  /** How long one request may take before the helper is restarted. Default 10s. */
+  timeoutMs?: number;
 }
 
 const BACKGROUND: NativeHelperOptions = { source: 'background.swift', binPrefix: 'cubg', label: 'Background' };
+const DEFAULT_TIMEOUT_MS = 10_000;
 
 /**
  * Split buffered stdout into complete lines plus the unterminated remainder.
@@ -43,13 +48,22 @@ export function splitLines(buffer: string): { lines: string[]; rest: string } {
   return { lines: parts.map((l) => l.trim()), rest };
 }
 
+type Child = ChildProcessWithoutNullStreams;
+
+interface Waiter {
+  /** The process this request was written to. A reply or an exit from any
+   * other process (the one it replaced, say) must not settle it. */
+  child: Child;
+  resolve: (line: string) => void;
+  reject: (e: Error) => void;
+}
+
 export class NativeHelper {
   constructor(private readonly opts: NativeHelperOptions = BACKGROUND) {}
 
-  private child: ChildProcessWithoutNullStreams | null = null;
+  private child: Child | null = null;
   private binary: Promise<string> | null = null;
-  private buffer = '';
-  private waiting: { resolve: (line: string) => void; reject: (e: Error) => void }[] = [];
+  private waiting: Waiter[] = [];
   private queue: Promise<unknown> = Promise.resolve();
 
   private async compile(): Promise<string> {
@@ -70,20 +84,50 @@ export class NativeHelper {
     return bin;
   }
 
-  private async process(): Promise<ChildProcessWithoutNullStreams> {
-    if (this.child && !this.child.killed && this.child.exitCode === null) return this.child;
-    this.binary ??= this.compile().catch((e) => { this.binary = null; throw e; });
-    const child = spawn(await this.binary, [], { stdio: ['pipe', 'pipe', 'pipe'] });
-    this.buffer = '';
-    child.stdout.on('data', (d: Buffer) => {
-      const { lines, rest } = splitLines(this.buffer + d.toString());
-      this.buffer = rest;
-      for (const line of lines) this.waiting.shift()?.resolve(line);
+  /** Reject every request written to `child`, and forget it if it is current. */
+  private retire(child: Child, why: Error): void {
+    if (this.child === child) this.child = null;
+    const mine = this.waiting.filter((w) => w.child === child);
+    this.waiting = this.waiting.filter((w) => w.child !== child);
+    for (const w of mine) w.reject(why);
+  }
+
+  private async process(): Promise<Child> {
+    if (this.child) return this.child;
+
+    let argv: string[];
+    if (this.opts.command) {
+      argv = this.opts.command;
+    } else {
+      this.binary ??= this.compile().catch((e) => { this.binary = null; throw e; });
+      argv = [await this.binary];
+    }
+
+    const child = spawn(argv[0]!, argv.slice(1), { stdio: ['pipe', 'pipe', 'pipe'] });
+    let buffer = '';
+    // Decode as a stream: a multi-byte character can straddle two chunks.
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (d: string) => {
+      const { lines, rest } = splitLines(buffer + d);
+      buffer = rest;
+      for (const line of lines) {
+        const i = this.waiting.findIndex((w) => w.child === child);
+        if (i >= 0) this.waiting.splice(i, 1)[0]!.resolve(line);
+      }
     });
     child.stderr.on('data', (d: Buffer) => process.stderr.write(`[${this.opts.binPrefix}] ${d.toString()}`));
     child.on('exit', (code) => {
-      this.child = null;
-      for (const w of this.waiting.splice(0)) w.reject(new Error(`${this.opts.label} helper exited with code ${code}.`));
+      this.retire(child, new Error(`${this.opts.label} helper exited with code ${code}.`));
+    });
+    // Without these listeners a missing binary (cache directory cleared) or a
+    // write to a dead process is an uncaught exception that takes the whole
+    // MCP server down.
+    child.on('error', (e: NodeJS.ErrnoException) => {
+      if (e.code === 'ENOENT') this.binary = null; // recompile next time
+      this.retire(child, new Error(`${this.opts.label} helper could not be started: ${e.message}`));
+    });
+    child.stdin.on('error', (e: Error) => {
+      this.retire(child, new Error(`${this.opts.label} helper is not accepting input: ${e.message}`));
     });
     this.child = child;
     return child;
@@ -91,20 +135,23 @@ export class NativeHelper {
 
   /** Send one request; resolves with the payload after "ok", rejects on "err". */
   request(line: string): Promise<string> {
+    const timeoutMs = this.opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const run = async () => {
       const child = await this.process();
       const reply = await new Promise<string>((resolve, reject) => {
-        const entry = {
-          resolve: (l: string) => { clearTimeout(timer); resolve(l); },
-          reject: (e: Error) => { clearTimeout(timer); reject(e); },
+        const entry: Waiter = {
+          child,
+          resolve: (l) => { clearTimeout(timer); resolve(l); },
+          reject: (e) => { clearTimeout(timer); reject(e); },
         };
-        // On timeout, drop this waiter and restart the helper: a late reply
-        // would otherwise be matched to the next request.
+        // On timeout, retire this process before anything else can use it: a
+        // late reply would otherwise be matched to the next request, and the
+        // next request must start a fresh process rather than write to this
+        // one while it is being killed.
         const timer = setTimeout(() => {
-          this.waiting = this.waiting.filter((w) => w !== entry);
+          this.retire(child, new Error(`${this.opts.label} helper did not respond within ${timeoutMs / 1000}s.`));
           child.kill();
-          reject(new Error(`${this.opts.label} helper did not respond within 10s.`));
-        }, 10_000);
+        }, timeoutMs);
         this.waiting.push(entry);
         child.stdin.write(`${line}\n`);
       });
@@ -117,7 +164,8 @@ export class NativeHelper {
   }
 
   close(): void {
-    this.child?.kill();
+    const child = this.child;
     this.child = null;
+    child?.kill();
   }
 }
