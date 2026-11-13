@@ -97,13 +97,21 @@ function activeDisplay(ctx: ServerContext): AttachedDisplay {
 }
 
 /** Map model-space coords to cliclick logical points against the last screenshot. */
-function toLogical(ctx: ServerContext, x: number, y: number): { x: number; y: number } {
+export function toLogical(ctx: ServerContext, x: number, y: number): { x: number; y: number } {
   if (ctx.basisStale) {
     throw new Error(
       'The display configuration changed since the last screenshot. Take a new screenshot before using coordinates.',
     );
   }
   const d = activeDisplay(ctx);
+  if (!d.isMain && d.geometry.originX === undefined) {
+    // Geometry from system_profiler (no desktop helper) has no origin. Mapping
+    // with (0, 0) would put this click on the main display instead.
+    throw new Error(
+      `Coordinates on the secondary display "${d.name}" need the desktop helper, which is not available ` +
+        '(CU_NATIVE_HELPER=0, or it could not be compiled). Use switch_display to return to the main display.',
+    );
+  }
   return modelToLogical(x, y, ctx.lastScreenshot?.dims ?? null, d.geometry);
 }
 

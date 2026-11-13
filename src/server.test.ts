@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dispatch } from './server.js';
+import { dispatch, toLogical } from './server.js';
 import { MAIN, LEFT, png, testContext } from './testSupport.js';
 
 const frame = async (geometry = MAIN) => ({
@@ -103,4 +103,22 @@ test('computer_batch refuses an ungranted frontmost app before any lookup or cli
   assert.equal(r.isError, true);
   assert.match(textOf(r), /not_granted|not in this session/);
   assert.deepEqual(sent, []);
+});
+
+test('without a measured origin, coordinates on a secondary display are refused, not sent to the main display', () => {
+  // The cliclick/screencapture fallback only knows each display's size. Mapping
+  // a secondary display's screenshot with origin (0, 0) clicks on the main one.
+  const ctx = testContext({}, [MAIN, LEFT]);
+  ctx.displays = ctx.displays.map((d) => ({
+    ...d,
+    displayId: undefined,
+    geometry: { logicalWidth: d.geometry.logicalWidth, logicalHeight: d.geometry.logicalHeight, scaleFactor: 2 },
+  }));
+  ctx.lastScreenshot = { png: Buffer.alloc(0), dims: { targetWidth: 1456, targetHeight: 819 } };
+
+  ctx.activeDisplayIndex = 2;
+  assert.throws(() => toLogical(ctx, 728, 410), /secondary display/);
+
+  ctx.activeDisplayIndex = 1;
+  assert.deepEqual(toLogical(ctx, 0, 0), { x: 0, y: 0 });
 });

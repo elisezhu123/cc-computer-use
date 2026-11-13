@@ -291,9 +291,37 @@ func postMouse(
     guard let e = CGEvent(mouseEventSource: eventSource, mouseType: type, mouseCursorPosition: p, mouseButton: button)
     else { return false }
     e.setIntegerValueField(.mouseEventClickState, value: clickState)
-    if flags != 0 { e.flags = CGEventFlags(rawValue: flags) }
+    // Always explicit, including "none": an event left with the source's
+    // flags inherits whatever modifier state is current, so one modified click
+    // could turn every later plain click into a shift-click.
+    e.flags = CGEventFlags(rawValue: flags)
     e.post(tap: .cghidEventTap)
     return true
+}
+
+/// Modifier flag -> virtual key code of the (left) modifier key.
+let MODIFIER_KEYS: [(flag: UInt64, code: CGKeyCode)] = [
+    (0x100000, 55), // command
+    (0x40000, 59),  // control
+    (0x80000, 58),  // option
+    (0x20000, 56),  // shift
+    (0x800000, 63), // fn
+]
+
+/// Press or release the modifier keys in `flags` as real key events, the way
+/// cliclick's kd:/ku: do. Flags on the mouse events alone are not enough:
+/// measured on a real click, a shift-flagged click with no key events left
+/// shift held in the session's modifier state until a key-up was posted.
+func postModifiers(_ flags: UInt64, down: Bool) {
+    var held: UInt64 = down ? 0 : flags
+    let keys = down ? MODIFIER_KEYS : MODIFIER_KEYS.reversed()
+    for (flag, code) in keys where flags & flag != 0 {
+        if down { held |= flag } else { held &= ~flag }
+        guard let e = CGEvent(keyboardEventSource: eventSource, virtualKey: code, keyDown: down) else { continue }
+        e.flags = CGEventFlags(rawValue: held)
+        e.post(tap: .cghidEventTap)
+        usleep(8_000)
+    }
 }
 
 func buttonEvents(_ button: Int) -> (down: CGEventType, up: CGEventType, button: CGMouseButton)? {
@@ -310,11 +338,18 @@ func click(button: Int, at p: CGPoint, count: Int, flags: UInt64) -> Bool {
     guard let b = buttonEvents(button) else { return false }
     var ok = postMouse(.mouseMoved, p)
     usleep(MOVE_SETTLE_US)
+    if flags != 0 { postModifiers(flags, down: true) }
     for i in 1...count {
         ok = postMouse(b.down, p, button: b.button, clickState: Int64(i), flags: flags) && ok
         usleep(8_000)
         ok = postMouse(b.up, p, button: b.button, clickState: Int64(i), flags: flags) && ok
         if i < count { usleep(8_000) }
+    }
+    if flags != 0 {
+        // Release in reverse, then one plain move so nothing downstream is
+        // left believing a modifier is still down.
+        postModifiers(flags, down: false)
+        ok = postMouse(.mouseMoved, p) && ok
     }
     return ok
 }
